@@ -1,0 +1,76 @@
+import type { AuditEvent } from "@/types";
+
+export const mockAuditEvents: AuditEvent[] = [
+  {
+    id: "aud_01", actor: "user_01", actorName: "Ahmed Hassan", actorRole: "admin",
+    action: "shortlist.approved", targetId: "shortlist_02", targetType: "shortlist",
+    targetLabel: "Top-3 Shortlist — ML Engineer", ip: "197.40.12.88", requestId: "req_a1b2c3",
+    timestamp: "2026-02-05T15:30:00Z", orgId: "org_01",
+    after: { status: "approved", candidateCount: 3, approver: "user_01" },
+  },
+  {
+    id: "aud_02", actor: "user_02", actorName: "Mona Kamal", actorRole: "hiring_manager",
+    action: "decision.finalized", targetId: "app_06", targetType: "application",
+    targetLabel: "Final Decision — Candidate #F-033 → Senior Full-Stack Engineer",
+    ip: "197.40.12.45", requestId: "req_d4e5f6",
+    timestamp: "2026-02-04T14:00:00Z", orgId: "org_01",
+    before: { status: "decision" }, after: { status: "hired", decision: "hire" },
+  },
+  {
+    id: "aud_03", actor: "agent_screening", actorName: "Screening Agent", actorRole: "recruiter",
+    action: "shortlist.proposed", targetId: "shortlist_01", targetType: "shortlist",
+    targetLabel: "Top-5 Shortlist — Senior Full-Stack Engineer", ip: "10.0.0.5", requestId: "req_g7h8i9",
+    timestamp: "2026-02-10T14:30:00Z", orgId: "org_01",
+    after: { status: "proposed", candidateCount: 5 },
+  },
+  {
+    id: "aud_04", actor: "user_01", actorName: "Ahmed Hassan", actorRole: "admin",
+    action: "member.invited", targetId: "user_06", targetType: "user",
+    targetLabel: "Hana Mostafa (hana@techcorp.io)", ip: "197.40.12.88", requestId: "req_j0k1l2",
+    timestamp: "2026-02-05T09:00:00Z", orgId: "org_01",
+    after: { role: "recruiter", status: "invited" },
+  },
+  {
+    id: "aud_05", actor: "user_01", actorName: "Ahmed Hassan", actorRole: "admin",
+    action: "candidate.deanonymized", targetId: "cand_03", targetType: "candidate",
+    targetLabel: "Candidate #C-271", ip: "197.40.12.88", requestId: "req_m3n4o5",
+    timestamp: "2026-02-03T12:00:00Z", orgId: "org_01",
+    after: { purpose: "pre_outreach", approvalId: "hitl_03" },
+  },
+  {
+    id: "aud_06", actor: "user_02", actorName: "Mona Kamal", actorRole: "hiring_manager",
+    action: "job.published", targetId: "job_02", targetType: "job",
+    targetLabel: "ML Engineer — LLM Platform", ip: "197.40.12.45", requestId: "req_p6q7r8",
+    timestamp: "2026-02-01T09:00:00Z", orgId: "org_01",
+    before: { status: "draft" }, after: { status: "published" },
+  },
+  {
+    id: "aud_07", actor: "agent_identity", actorName: "Identity Resolution Agent", actorRole: "recruiter",
+    action: "candidate.merged", targetId: "cand_04", targetType: "candidate",
+    targetLabel: "Merged duplicate into Candidate #D-055", ip: "10.0.0.5", requestId: "req_s9t0u1",
+    timestamp: "2026-02-04T10:00:00Z", orgId: "org_01",
+    after: { mergedFrom: "cand_dup_04", confidence: 0.91 },
+  },
+  {
+    id: "aud_08", actor: "user_03", actorName: "Tamer Saad", actorRole: "recruiter",
+    action: "application.created", targetId: "app_01", targetType: "application",
+    targetLabel: "Layla Hassan → Senior Full-Stack Engineer", ip: "197.40.12.60", requestId: "req_v2w3x4",
+    timestamp: "2026-01-16T10:00:00Z", orgId: "org_01",
+    after: { status: "applied", sourcePlatform: "LinkedIn" },
+  },
+  {
+    id: "aud_09", actor: "user_01", actorName: "Ahmed Hassan", actorRole: "admin",
+    action: "org.settings_updated", targetId: "org_01", targetType: "organization",
+    targetLabel: "TechCorp Egypt settings update", ip: "197.40.12.88", requestId: "req_y5z6a7",
+    timestamp: "2026-01-20T11:00:00Z", orgId: "org_01",
+    before: { anonymizationLevel: "minimal" }, after: { anonymizationLevel: "standard" },
+  },
+  {
+    id: "aud_10", actor: "agent_assessment", actorName: "Assessment Agent", actorRole: "recruiter",
+    action: "assessment.generated", targetId: "assess_01", targetType: "assessment",
+    targetLabel: "TypeScript Architecture Assessment — Candidate #A-112",
+    ip: "10.0.0.5", requestId: "req_b8c9d0",
+    timestamp: "2026-02-01T09:00:00Z", orgId: "org_01",
+    after: { type: "coding", dueAt: "2026-02-08T09:00:00Z" },
+  },
+];

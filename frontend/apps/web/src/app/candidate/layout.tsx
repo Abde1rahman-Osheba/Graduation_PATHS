@@ -1,0 +1,130 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect } from "react";
+import {
+  Zap, LayoutDashboard, User, FileText, Briefcase, Settings, LogOut, Search,
+} from "lucide-react";
+import { cn } from "@/lib/utils/cn";
+import { useCandidateProfile } from "@/lib/hooks";
+import { createEmptyCandidateProfile } from "@/lib/candidate/portal-profile";
+import { useAuthStore } from "@/lib/stores/auth.store";
+
+const NAV_LINKS = [
+  { href: "/candidate/dashboard",    label: "Dashboard",    Icon: LayoutDashboard },
+  { href: "/careers",                label: "Open Jobs",    Icon: Search          },
+  { href: "/candidate/profile",      label: "My Profile",   Icon: User            },
+  { href: "/candidate/documents",    label: "Documents",    Icon: FileText        },
+  { href: "/candidate/applications", label: "Applications", Icon: Briefcase       },
+];
+
+export default function CandidateLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { isAuthenticated, _hasHydrated, user } = useAuthStore();
+  const { data: profile = createEmptyCandidateProfile(), isLoading } = useCandidateProfile();
+
+  const isCandidateSession =
+    user?.accountType === "candidate" || user?.role === "candidate";
+
+  useEffect(() => {
+    if (!_hasHydrated) return;
+    if (!isAuthenticated) {
+      router.replace("/login");
+      return;
+    }
+    if (!isCandidateSession) {
+      router.replace("/dashboard");
+    }
+  }, [_hasHydrated, isAuthenticated, isCandidateSession, router]);
+  const displayName = profile.fullName.trim() || (isLoading ? "…" : "Candidate");
+  const displayTitle = profile.currentTitle.trim() || (isLoading ? "" : "—");
+
+  if (!_hasHydrated || !isAuthenticated || !isCandidateSession) {
+    return null;
+  }
+
+  return (
+    <div className="flex min-h-screen bg-background">
+      {/* Sidebar */}
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-border/40 bg-navy-950 lg:flex">
+        {/* Logo */}
+        <div className="flex items-center gap-2.5 border-b border-border/40 p-6">
+          <Link href="/" className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/15 ring-1 ring-primary/30">
+              <Zap className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <p className="font-heading text-sm font-bold text-foreground">PATHS</p>
+              <p className="text-[10px] text-muted-foreground">Candidate Portal</p>
+            </div>
+          </Link>
+        </div>
+
+        {/* User info */}
+        <div className="border-b border-border/40 px-5 py-4">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/20 text-sm font-bold text-primary mb-2">
+            {displayName.charAt(0)}
+          </div>
+          <p className="text-sm font-semibold text-foreground truncate">{displayName}</p>
+          <p className="text-[11px] text-muted-foreground truncate">{displayTitle}</p>
+        </div>
+
+        {/* Nav */}
+        <nav className="flex-1 p-4 space-y-1">
+          {NAV_LINKS.map(({ href, label, Icon }) => {
+            const active = pathname === href || (href !== "/candidate/dashboard" && pathname.startsWith(href));
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
+                  active
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Footer */}
+        <div className="border-t border-border/40 p-4 space-y-1">
+          <Link href="/candidate/settings" className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-all">
+            <Settings className="h-4 w-4" /> Settings
+          </Link>
+          <Link href="/login" className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-all">
+            <LogOut className="h-4 w-4" /> Sign Out
+          </Link>
+        </div>
+      </aside>
+
+      {/* Mobile top bar */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between border-b border-border/40 bg-background/90 backdrop-blur px-4 py-3">
+        <Link href="/" className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
+            <Zap className="h-3.5 w-3.5 text-primary" />
+          </div>
+          <span className="font-heading text-sm font-bold">PATHS</span>
+        </Link>
+        <div className="flex items-center gap-1">
+          {NAV_LINKS.map(({ href, Icon }) => (
+            <Link key={href} href={href} className={cn("flex h-9 w-9 items-center justify-center rounded-lg transition-colors", pathname.startsWith(href) ? "bg-primary/15 text-primary" : "text-muted-foreground")}>
+              <Icon className="h-4 w-4" />
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      {/* Main */}
+      <main className="flex-1 overflow-y-auto lg:pt-0 pt-16">
+        {children}
+      </main>
+    </div>
+  );
+}
