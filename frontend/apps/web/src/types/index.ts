@@ -55,16 +55,28 @@ export type SkillProficiency = "beginner" | "intermediate" | "advanced" | "exper
 
 // ─── User & Auth ─────────────────────────────────────────────────────────────
 
+export type OrganizationStatus =
+  | "pending_approval"
+  | "active"
+  | "rejected"
+  | "suspended";
+
 export interface User {
   id: string;
   email: string;
   name: string;
   avatar?: string;
   role: UserRole;
-  /** Backend ``account_type``: ``candidate`` | ``organization_member`` */
+  /** Backend ``account_type``: ``candidate`` | ``organization_member`` | ``platform_admin`` */
   accountType?: string;
   orgId: string;
   orgName: string;
+  /** Lifecycle status of the user's organisation. ``null`` for candidates / platform admins. */
+  organizationStatus?: OrganizationStatus | null;
+  /** True iff the user has ``account_type='platform_admin'``. */
+  isPlatformAdmin?: boolean;
+  /** Frontend-side permission strings the backend sends in /auth/me. */
+  permissions?: string[];
   createdAt: string;
   lastLogin: string;
   mfaEnabled: boolean;

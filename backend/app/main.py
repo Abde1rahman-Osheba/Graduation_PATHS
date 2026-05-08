@@ -5,8 +5,10 @@ PATHS Backend — FastAPI application entry point.
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from urllib.parse import urlparse
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
@@ -21,6 +23,19 @@ async def lifespan(app: FastAPI):
     from app.core.logging import get_logger
     logger = get_logger(__name__)
     logger.info("Starting %s (%s)", settings.app_name, settings.app_env)
+
+    # Log startup warnings for non-production-safe config
+    if settings.debug:
+        logger.warning("DEBUG mode is enabled — disable in production with debug=False")
+    if settings.secret_key == "CHANGE-ME-TO-A-RANDOM-SECRET":
+        logger.warning("SECRET_KEY is still the default — set a strong random secret in production")
+    if settings.candidate_sourcing_provider == "mock" and settings.app_env == "development":
+        logger.info("Candidate sourcing provider is 'mock' — only suitable for local development")
+    elif settings.candidate_sourcing_provider == "mock" and settings.app_env != "development":
+        logger.warning(
+            "Candidate sourcing provider is 'mock' in a non-development environment. "
+            "Configure a real provider or disable candidate sourcing."
+        )
 
     # Hourly job-scraper scheduler — opt-in via ENABLE_SCHEDULER=true and
     # JOB_SCRAPER_ENABLED / LINKEDIN_SCRAPER_ENABLED.
@@ -51,6 +66,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Trusted Host middleware ──────────────────────────────────────────────
+trusted_hosts = set()
+for origin in settings.cors_origin_list:
+    parsed = urlparse(origin)
+    if parsed.hostname:
+        host = parsed.hostname
+        trusted_hosts.add(host)
+        if parsed.port:
+            trusted_hosts.add(f"{host}:{parsed.port}")
+trusted_hosts.update(["localhost", "127.0.0.1", settings.app_host])
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=list(trusted_hosts),
+)
+
+# ── CORS ─────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -58,6 +90,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Security headers ─────────────────────────────────────────────────────
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if settings.app_env != "development":
+        response.headers["Strict-Transport-Security"] = \
+            "max-age=31536000; includeSubDomains"
+    return response
 
 # ── Import routers ─────────────────────────────────────────────────────
 from app.api.v1.health import router as health_router  # noqa: E402
@@ -68,6 +113,7 @@ from app.api.v1.auth import router as auth_router  # noqa: E402
 from app.api.v1.organizations import router as organizations_router  # noqa: E402
 from app.api.v1.job_ingestion import router as job_ingestion_router  # noqa: E402
 from app.api.v1.admin import router as admin_router  # noqa: E402
+from app.api.v1.platform_admin import router as platform_admin_router  # noqa: E402
 from app.api.v1.job_import import router as job_import_router  # noqa: E402
 from app.api.v1.scoring import router as scoring_router  # noqa: E402
 from app.api.v1.organization_matching import (  # noqa: E402
@@ -90,6 +136,10 @@ from app.api.v1.google_integration import router as google_integration_router  #
 from app.api.v1.outreach_agent import router as outreach_agent_router  # noqa: E402
 from app.api.v1.scheduling import router as scheduling_router  # noqa: E402
 from app.api.v1.interview_runtime import router as interview_runtime_router  # noqa: E402
+from app.api.v1.assessment import router as assessment_router  # noqa: E402
+from app.api.v1.screening import router as screening_router  # noqa: E402
+from app.api.v1.contact_enrichment import router as contact_enrichment_router  # noqa: E402
+from app.api.v1.identity_resolution import router as identity_resolution_router  # noqa: E402
 from app.api.v1.idss import (  # noqa: E402
     candidate_plans_router,
     decision_extra_router,
@@ -104,6 +154,7 @@ app.include_router(candidates_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(job_ingestion_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(platform_admin_router, prefix="/api/v1")
 app.include_router(job_import_router, prefix="/api/v1")
 app.include_router(scoring_router, prefix="/api/v1")
 app.include_router(organization_matching_router, prefix="/api/v1")
@@ -123,6 +174,10 @@ app.include_router(google_integration_router, prefix="/api/v1")
 app.include_router(outreach_agent_router, prefix="/api/v1")
 app.include_router(scheduling_router, prefix="/api/v1")
 app.include_router(interview_runtime_router, prefix="/api/v1")
+app.include_router(assessment_router, prefix="/api/v1")
+app.include_router(screening_router, prefix="/api/v1")
+app.include_router(contact_enrichment_router, prefix="/api/v1")
+app.include_router(identity_resolution_router, prefix="/api/v1")
 app.include_router(decision_extra_router, prefix="/api/v1")
 app.include_router(plans_router, prefix="/api/v1")
 app.include_router(candidate_plans_router, prefix="/api/v1")

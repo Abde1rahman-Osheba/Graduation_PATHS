@@ -6,10 +6,8 @@ Routes:
   GET  /admin/job-import/status      — scheduler + last-run summary
   GET  /admin/job-import/history     — recent `job_import_runs` rows
 
-The router is mounted under `/api/v1` by `app.main`. It is intentionally
-unauthenticated when no `require_account_type` dependency is supplied,
-so the project owner can verify the integration during bring-up. Once
-admin auth is wired into the app, swap the `Depends` line accordingly.
+All endpoints require account_type='platform_admin' (tightened during the
+platform-admin / RBAC overhaul; was previously unauthenticated).
 """
 
 from __future__ import annotations
@@ -21,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.dependencies import require_platform_admin
 from app.db.repositories import job_scraper_repo as repo
 from app.schemas.job_scraper import (
     JobImportResult,
@@ -33,7 +32,11 @@ from app.services.job_scraper.scheduler import scheduler as job_scheduler
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin/job-import", tags=["Admin — Job Import"])
+router = APIRouter(
+    prefix="/admin/job-import",
+    tags=["Admin — Job Import"],
+    dependencies=[Depends(require_platform_admin)],
+)
 settings = get_settings()
 
 

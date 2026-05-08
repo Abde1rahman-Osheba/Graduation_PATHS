@@ -508,7 +508,12 @@ def shortlist_sourced_candidate(
 # ── Admin: trigger one sourcing run ──────────────────────────────────────
 
 
-admin_router = APIRouter(tags=["Admin — Candidate Sourcing"])
+from app.core.dependencies import require_platform_admin  # noqa: E402
+
+admin_router = APIRouter(
+    tags=["Admin — Candidate Sourcing"],
+    dependencies=[Depends(require_platform_admin)],
+)
 
 
 @admin_router.post(

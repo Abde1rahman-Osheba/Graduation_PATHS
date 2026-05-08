@@ -54,6 +54,24 @@ export const candidatePortalLegacyApi = {
   getApplications: () => api.get<BackendCandidateAppOut[]>("/api/v1/candidates/me/applications"),
 
   /**
+   * Submit a direct application for a job as the current candidate.
+   * Returns 201 on success, throws ApiError(409) if already applied.
+   */
+  applyToJob: (jobId: string) =>
+    api.post<{ id: string; job_id: string; stage: string; message: string }>(
+      `/api/v1/candidates/me/jobs/${jobId}/apply`,
+    ),
+
+  /**
+   * Check whether the current candidate has already applied to a job.
+   * Returns { applied, application_id, stage } — never throws for missing profile.
+   */
+  getApplicationStatus: (jobId: string) =>
+    api.get<{ applied: boolean; application_id: string | null; stage: string | null }>(
+      `/api/v1/candidates/me/jobs/${jobId}/application-status`,
+    ),
+
+  /**
    * Upload CV for ingestion (ties to candidate when `candidateId` is set).
    */
   uploadCV: async (file: File, candidateId?: string) => {
@@ -94,4 +112,6 @@ export const candidatePortalApi = {
   submitOnboarding: candidatePortalLegacyApi.updateProfileFromDraft,
   uploadCV: candidatePortalLegacyApi.uploadCV,
   getApplications: candidatePortalLegacyApi.getApplications,
+  applyToJob: candidatePortalLegacyApi.applyToJob,
+  getApplicationStatus: candidatePortalLegacyApi.getApplicationStatus,
 };

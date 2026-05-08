@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -101,6 +101,7 @@ export function OutreachModal({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [recipient, setRecipient] = useState(candidate.email ?? "");
+  const prevCandidateId = useRef(candidate.id);
   const [interviewType, setInterviewType] = useState("HR Interview");
   const [duration, setDuration] = useState(30);
   const [buffer, setBuffer] = useState(10);
@@ -114,10 +115,14 @@ export function OutreachModal({
     | null
   >(null);
 
+  if (prevCandidateId.current !== candidate.id) {
+    prevCandidateId.current = candidate.id;
+    setRecipient((prev) => prev || candidate.email || "");
+  }
+
   // Auto-generate when the modal opens for the first time per candidate.
   useEffect(() => {
     if (!open) return;
-    setRecipient((prev) => prev || candidate.email || "");
     if (!subject && !body) {
       void onGenerate();
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Upload, FileText, CheckCircle2, Clock, AlertCircle, Trash2, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,22 +30,19 @@ function formatBytes(bytes: number) {
 export default function DocumentsPage() {
   const { data: profile = createEmptyCandidateProfile() } = useCandidateProfile();
   const uploadCV = useCVUpload();
-  const [documents, setDocuments] = useState<UploadedDocument[]>([]);
+  const [localUploads, setLocalUploads] = useState<UploadedDocument[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  const documents = useMemo(() => {
     const fromProfile = [...(profile.documents ?? [])];
     if (profile.cvDocument) fromProfile.unshift(profile.cvDocument);
-    setDocuments((prev) => {
-      if (fromProfile.length === 0 && prev.length > 0) return prev;
-      const serverIds = new Set(fromProfile.map((d) => d.id));
-      const pendingLocal = prev.filter((d) => !serverIds.has(d.id));
-      return [...pendingLocal, ...fromProfile];
-    });
-  }, [profile.documents, profile.cvDocument]);
+    const serverIds = new Set(fromProfile.map((d) => d.id));
+    const pendingLocal = localUploads.filter((d) => !serverIds.has(d.id));
+    return [...pendingLocal, ...fromProfile];
+  }, [profile.documents, profile.cvDocument, localUploads]);
 
   const handleFile = useCallback(async (file: File) => {
     setError(null);
@@ -68,13 +65,13 @@ export default function DocumentsPage() {
       status: "processing",
     };
     setUploading(true);
-    setDocuments((prev) => [newDoc, ...prev]);
+    setLocalUploads((prev) => [newDoc, ...prev]);
 
     try {
       await uploadCV.mutateAsync({ file });
-      setDocuments((prev) => prev.map((d) => (d.id === newDoc.id ? { ...d, status: "processed" } : d)));
+      setLocalUploads((prev) => prev.map((d) => (d.id === newDoc.id ? { ...d, status: "processed" } : d)));
     } catch (e) {
-      setDocuments((prev) => prev.map((d) => (d.id === newDoc.id ? { ...d, status: "failed" } : d)));
+      setLocalUploads((prev) => prev.map((d) => (d.id === newDoc.id ? { ...d, status: "failed" } : d)));
       setError(e instanceof Error ? e.message : "Upload failed. Try again.");
     } finally {
       setUploading(false);
@@ -89,7 +86,7 @@ export default function DocumentsPage() {
   };
 
   const removeDocument = (id: string) =>
-    setDocuments((prev) => prev.filter((d) => d.id !== id));
+    setLocalUploads((prev) => prev.filter((d) => d.id !== id));
 
   return (
     <div className="min-h-screen px-6 py-8">

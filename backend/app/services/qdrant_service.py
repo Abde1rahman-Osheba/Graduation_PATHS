@@ -85,6 +85,22 @@ class QdrantService:
         info = self._client.get_collections()
         return [c.name for c in info.collections]
 
+    def get_collection_info(self, name: str) -> dict:
+        """Return detailed info for a single collection."""
+        info = self._client.get_collection(name)
+        return {
+            "name": name,
+            "status": info.status,
+            "vectors_count": getattr(info, "vectors_count", None),
+            "dimension": (
+                info.config.params.vectors.size
+                if hasattr(info.config, "params")
+                and hasattr(info.config.params, "vectors")
+                and hasattr(info.config.params.vectors, "size")
+                else None
+            ),
+        }
+
     # ── Vector operations ──────────────────────────────────────────────
 
     def upsert_vectors(

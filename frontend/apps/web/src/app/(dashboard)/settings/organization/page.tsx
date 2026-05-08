@@ -49,7 +49,7 @@ export default function OrganizationPage() {
     <div className="h-full overflow-y-auto p-6 space-y-6 max-w-3xl">
       <div>
         <h1 className="font-heading text-xl font-bold tracking-tight text-foreground">Organization</h1>
-        <p className="text-sm text-muted-foreground">Manage {org.name}'s settings and configuration.</p>
+        <p className="text-sm text-muted-foreground">Manage {org.name}&apos;s settings and configuration.</p>
       </div>
 
       {/* Profile */}

@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   Calendar, Clock, Video, Search, X, ChevronRight,
   Plus, Users, Loader2, CheckCircle2, AlertCircle,
-  Mic, Brain, User,
+  Mic, Brain, User, Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,9 @@ import {
   useInterviews,
   useJobs,
   useScheduleInterview,
+  useGoogleIntegrationStatus,
 } from "@/lib/hooks";
+import { googleIntegrationApi } from "@/lib/api";
 import type { Application } from "@/types";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -67,6 +69,9 @@ function ScheduleModal({
   const [slotEnd, setSlotEnd] = useState("");
   const [meetingUrl, setMeetingUrl] = useState("");
   const scheduleInterview = useScheduleInterview();
+  const { data: googleStatus } = useGoogleIntegrationStatus();
+
+  const googleConnected = googleStatus?.connected ?? false;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,9 +84,9 @@ function ScheduleModal({
         slot_start: new Date(slotStart).toISOString(),
         slot_end: new Date(slotEnd).toISOString(),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        meeting_provider: meetingUrl ? "manual" : "google_meet",
+        meeting_provider: googleConnected ? "google_meet" : meetingUrl ? "manual" : "google_meet",
         manual_meeting_url: meetingUrl || null,
-        create_calendar_event: false,
+        create_calendar_event: googleConnected,
       },
       {
         onSuccess: () => onClose(),
@@ -185,6 +190,42 @@ function ScheduleModal({
             />
           </div>
 
+          {/* Google Calendar status */}
+          <div className={cn(
+            "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs",
+            googleConnected
+              ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400"
+              : "border-amber-500/30 bg-amber-500/5 text-amber-400",
+          )}>
+            <Globe className="h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1">
+              {googleConnected
+                ? `Google Calendar connected (${googleStatus?.email})`
+                : "Google Calendar not connected"}
+            </span>
+            {!googleConnected && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-[11px]"
+                onClick={async () => {
+                  const { authorize_url } = await googleIntegrationApi.connect();
+                  const w = window.open(authorize_url, "google-oauth", "width=600,height=700");
+                  const handler = (e: MessageEvent) => {
+                    if (e.data?.type === "paths-google-oauth") {
+                      window.removeEventListener("message", handler);
+                      w?.close();
+                      window.location.reload();
+                    }
+                  };
+                  window.addEventListener("message", handler);
+                }}
+              >
+                Connect
+              </Button>
+            )}
+          </div>
+
           {scheduleInterview.error && (
             <p className="text-xs text-rose-400">{String((scheduleInterview.error as Error).message)}</p>
           )}
@@ -265,8 +306,8 @@ export default function InterviewsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [showModal, setShowModal] = useState(false);
 
-  const { data: applications = [] } = useApplications();
-  const { data: interviews = [] } = useInterviews(orgId);
+  const { data: applications = [], isLoading: appsLoading } = useApplications();
+  const { data: interviews = [], isLoading: interviewsLoading } = useInterviews(orgId);
 
   const filtered = interviews.filter((iv) => {
     const q = query.toLowerCase();
@@ -363,7 +404,13 @@ export default function InterviewsPage() {
 
           {/* List */}
           <div className="space-y-3">
-            {filtered.length === 0 ? (
+            {interviewsLoading || appsLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading interviews…
+                </div>
+              </div>
+            ) : filtered.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-border/40 py-16 text-center">
                 <Calendar className="mx-auto mb-3 h-10 w-10 text-muted-foreground/30" />
                 <p className="text-sm text-muted-foreground">No interviews found.</p>

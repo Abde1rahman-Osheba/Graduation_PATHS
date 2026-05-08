@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
@@ -40,13 +40,18 @@ const perks = [
   { icon: CheckCircle2, label: "Transparent scores",       sub: "See exactly why you ranked where you did" },
 ];
 
-export default function CandidateSignupPage() {
-  const router = useRouter();
-  const login = useAuthStore((s) => s.login);
+function CandidateSignupForm() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+  const login        = useAuthStore((s) => s.login);
+
+  // Preserve the job/page the candidate was trying to reach before signup
+  const redirectTo = searchParams.get("redirectTo") ?? null;
+
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm]   = useState(false);
+  const [isLoading, setIsLoading]       = useState(false);
+  const [error, setError]               = useState<string | null>(null);
 
   const {
     register,
@@ -60,12 +65,17 @@ export default function CandidateSignupPage() {
     try {
       await candidatePortalApi.signup({
         full_name: data.full_name,
-        email: data.email,
-        password: data.password,
-        phone: data.phone || undefined,
+        email:     data.email,
+        password:  data.password,
+        phone:     data.phone || undefined,
       });
       await login(data.email, data.password);
-      router.push("/onboarding/basic-info");
+
+      // Pass the intent through onboarding so it's preserved after completion
+      const onboardingUrl = redirectTo
+        ? `/onboarding/basic-info?redirectTo=${encodeURIComponent(redirectTo)}`
+        : "/onboarding/basic-info";
+      router.push(onboardingUrl);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -267,5 +277,13 @@ export default function CandidateSignupPage() {
         </motion.div>
       </div>
     </div>
+  );
+}
+
+export default function CandidateSignupPage() {
+  return (
+    <Suspense>
+      <CandidateSignupForm />
+    </Suspense>
   );
 }

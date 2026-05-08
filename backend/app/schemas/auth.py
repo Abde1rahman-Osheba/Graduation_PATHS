@@ -71,6 +71,7 @@ class OrganizationContext(BaseModel):
     organization_id: UUID
     organization_name: str
     role_code: str
+    status: str = "active"  # active | pending_approval | rejected | suspended
 
 
 class UserSummary(BaseModel):
@@ -79,6 +80,7 @@ class UserSummary(BaseModel):
     full_name: str
     account_type: str
     organization: OrganizationContext | None = None
+    is_platform_admin: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -113,7 +115,9 @@ class MeResponse(BaseModel):
     full_name: str
     account_type: str
     is_active: bool
+    is_platform_admin: bool = False
     candidate_profile: CandidateProfileSummary | None = None
     organization: OrganizationContext | None = None
+    permissions: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}

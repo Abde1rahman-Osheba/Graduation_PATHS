@@ -75,7 +75,7 @@ export default function LinksPage() {
         <p className="text-xs font-semibold uppercase tracking-widest text-primary">Step 7 of 9</p>
         <h1 className="mt-1 font-heading text-3xl font-bold text-foreground">Professional Links</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Add links to your online presence. All fields are optional — add what's relevant.
+          Add links to your online presence. All fields are optional — add what&apos;s relevant.
         </p>
       </div>
 

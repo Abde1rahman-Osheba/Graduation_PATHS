@@ -49,24 +49,26 @@ export default function EditProfilePage() {
 
   useEffect(() => {
     if (!profile.id) return;
-    setForm({
-      fullName:        profile.fullName,
-      currentTitle:    profile.currentTitle,
-      summary:         profile.summary,
-      careerLevel:     profile.careerLevel,
-      yearsExperience: profile.yearsExperience,
-      email:           profile.email,
-      phone:           profile.phone ?? "",
-      locationCity:    profile.locationCity ?? "",
-      locationCountry: profile.locationCountry ?? "",
-      linkedin:        profile.links.linkedin ?? "",
-      github:          profile.links.github ?? "",
-      portfolio:       profile.links.portfolio ?? "",
-      website:         profile.links.website ?? "",
-      salaryMin:       profile.preferences.desiredSalaryMin ?? "",
-      salaryMax:       profile.preferences.desiredSalaryMax ?? "",
-      salaryCurrency:  profile.preferences.salaryCurrency,
-    });
+    (async () => {
+      setForm({
+        fullName:        profile.fullName,
+        currentTitle:    profile.currentTitle,
+        summary:         profile.summary,
+        careerLevel:     profile.careerLevel,
+        yearsExperience: profile.yearsExperience,
+        email:           profile.email,
+        phone:           profile.phone ?? "",
+        locationCity:    profile.locationCity ?? "",
+        locationCountry: profile.locationCountry ?? "",
+        linkedin:        profile.links.linkedin ?? "",
+        github:          profile.links.github ?? "",
+        portfolio:       profile.links.portfolio ?? "",
+        website:         profile.links.website ?? "",
+        salaryMin:       profile.preferences.desiredSalaryMin ?? "",
+        salaryMax:       profile.preferences.desiredSalaryMax ?? "",
+        salaryCurrency:  profile.preferences.salaryCurrency,
+      });
+    })();
   }, [profile]);
 
   const update = (key: keyof typeof form, value: string | number) =>

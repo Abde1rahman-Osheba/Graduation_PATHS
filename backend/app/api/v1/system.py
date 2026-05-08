@@ -41,3 +41,10 @@ def qdrant_list_collections():
     """List all existing Qdrant collections."""
     svc = QdrantService()
     return {"collections": svc.list_collections()}
+
+
+@router.get("/qdrant/collections/{name}")
+def qdrant_get_collection(name: str):
+    """Get detailed info about a specific Qdrant collection."""
+    svc = QdrantService()
+    return svc.get_collection_info(name)

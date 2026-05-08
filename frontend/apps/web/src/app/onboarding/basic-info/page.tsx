@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -32,9 +33,18 @@ const careerLevels = [
   { value: "executive", label: "Executive" },
 ];
 
-export default function BasicInfoPage() {
+function BasicInfoForm() {
   const router = useRouter();
-  const { draft, updateDraft, markStepComplete, saveDraft } = useOnboardingStore();
+  const searchParams = useSearchParams();
+  const { draft, updateDraft, markStepComplete, saveDraft, setPostOnboardingRedirect } = useOnboardingStore();
+
+  // Capture the intent URL once, on mount — persisted in the store so it
+  // survives the entire 9-step onboarding flow and is available on review.
+  useEffect(() => {
+    const redirectTo = searchParams.get("redirectTo");
+    if (redirectTo) setPostOnboardingRedirect(decodeURIComponent(redirectTo));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const {
     register,
@@ -160,5 +170,13 @@ export default function BasicInfoPage() {
         </div>
       </form>
     </motion.div>
+  );
+}
+
+export default function BasicInfoPage() {
+  return (
+    <Suspense>
+      <BasicInfoForm />
+    </Suspense>
   );
 }

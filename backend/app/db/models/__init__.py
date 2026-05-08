@@ -1,7 +1,12 @@
 # PATHS Backend — DB models package
 
 from app.db.models.base import Base
-from app.db.models.organization import Organization
+from app.db.models.organization import (
+    Organization,
+    OrganizationStatus,
+    OrganizationAccessRequest,
+    OrganizationAccessRequestStatus,
+)
 from app.db.models.user import User
 from app.db.models.candidate import Candidate
 from app.db.models.job import Job
@@ -62,10 +67,24 @@ from app.db.models.outreach_agent import (
     OutreachAvailabilityWindow,
     InterviewBooking,
 )
+from app.db.models.assessment import Assessment
+from app.db.models.bias_fairness import (
+    AnonymizedView,
+    BiasFlag,
+    DeAnonEvent,
+    BiasAuditLog,
+)
+from app.db.models.evidence import EvidenceItem, CandidateSource
+from app.db.models.hitl import HITLApproval
+from app.db.models.contact_enrichment import EnrichedContact
+from app.db.models.identity_resolution import CandidateDuplicate, MergeHistory
 
 __all__ = [
     "Base",
     "Organization",
+    "OrganizationStatus",
+    "OrganizationAccessRequest",
+    "OrganizationAccessRequestStatus",
     "User",
     "Candidate",
     "Job",
@@ -134,4 +153,21 @@ __all__ = [
     "OutreachSession",
     "OutreachAvailabilityWindow",
     "InterviewBooking",
+    # Assessment Agent
+    "Assessment",
+    # Bias & Fairness
+    "AnonymizedView",
+    "BiasFlag",
+    "DeAnonEvent",
+    "BiasAuditLog",
+    # Evidence
+    "EvidenceItem",
+    "CandidateSource",
+    # HITL
+    "HITLApproval",
+    # Contact Enrichment
+    "EnrichedContact",
+    # Identity Resolution
+    "CandidateDuplicate",
+    "MergeHistory",
 ]

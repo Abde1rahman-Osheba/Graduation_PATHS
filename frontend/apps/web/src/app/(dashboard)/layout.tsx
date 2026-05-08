@@ -5,6 +5,16 @@ import { useRouter } from "next/navigation";
 import { Shell } from "@/components/layout/shell";
 import { useAuthStore } from "@/lib/stores/auth.store";
 
+/**
+ * Dashboard route group — gating rules:
+ *
+ *  1. Must be signed in.
+ *  2. Platform admins → /admin (their workspace).
+ *  3. Candidates → /candidate/dashboard.
+ *  4. Org members whose organisation is NOT in `active` status are routed
+ *     to /pending-approval or /rejected. They must never see live dashboard
+ *     pages because every backend API will reject them with 403 anyway.
+ */
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, _hasHydrated, user } = useAuthStore();
   const router = useRouter();
@@ -12,21 +22,43 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!_hasHydrated) return;
     if (!isAuthenticated) {
-      router.push("/login");
+      router.push("/login?next=/dashboard");
+      return;
+    }
+    if (user?.isPlatformAdmin || user?.accountType === "platform_admin") {
+      router.replace("/admin");
       return;
     }
     const isCandidate =
       user?.accountType === "candidate" || user?.role === "candidate";
     if (isCandidate) {
       router.replace("/candidate/dashboard");
+      return;
     }
-  }, [_hasHydrated, isAuthenticated, user?.accountType, user?.role, router]);
+    if (user?.accountType === "organization_member") {
+      if (user.organizationStatus === "pending_approval") {
+        router.replace("/pending-approval");
+        return;
+      }
+      if (user.organizationStatus === "rejected" || user.organizationStatus === "suspended") {
+        router.replace("/rejected");
+        return;
+      }
+    }
+  }, [_hasHydrated, isAuthenticated, user, router]);
 
-  if (!_hasHydrated) return null;
-  if (!isAuthenticated) return null;
+  if (!_hasHydrated || !isAuthenticated) return null;
+  if (user?.isPlatformAdmin || user?.accountType === "platform_admin") return null;
   const isCandidateUser =
     user?.accountType === "candidate" || user?.role === "candidate";
   if (isCandidateUser) return null;
+  if (
+    user?.accountType === "organization_member" &&
+    user.organizationStatus &&
+    user.organizationStatus !== "active"
+  ) {
+    return null;
+  }
 
   return <Shell>{children}</Shell>;
 }

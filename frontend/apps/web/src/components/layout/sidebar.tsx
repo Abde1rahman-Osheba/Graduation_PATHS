@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  LayoutDashboard, Users, Briefcase, CheckSquare, Settings,
+  LayoutDashboard, Users, Briefcase, CheckSquare,
   FileText, ChevronLeft, ChevronRight, Zap, Bot,
-  Building2, Shield, Calendar, Telescope, Sparkles,
+  Building2, Shield, ShieldCheck, Calendar, Telescope, Sparkles, Search, ClipboardCheck,
+  Database, Upload, Library, GitMerge, Contact,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useUIStore } from "@/lib/stores/ui.store";
-import { usePendingApprovals } from "@/lib/hooks";
+import { usePendingApprovals, useAgentStatus } from "@/lib/hooks";
 
 const navItems = [
   {
@@ -25,8 +26,18 @@ const navItems = [
     group: "Workflow",
     items: [
       { label: "Sourcing",       href: "/sourcing",   icon: Sparkles },
+      { label: "Matching",       href: "/org/matching",  icon: Search },
       { label: "Approvals",      href: "/approvals",  icon: CheckSquare, badge: true },
       { label: "Interviews",     href: "/interviews", icon: Calendar },
+      { label: "Assessments",    href: "/org/assessments", icon: ClipboardCheck },
+      { label: "Job Ingestion",  href: "/org/job-ingestion", icon: Database },
+      { label: "CV Ingestion",   href: "/org/cv-ingestion", icon: Upload },
+      { label: "Bias & Fairness", href: "/org/bias",    icon: ShieldCheck },
+      { label: "Decision Support", href: "/org/decision-support", icon: FileText },
+      { label: "Identity Resolution", href: "/org/identity-resolution", icon: GitMerge },
+      { label: "Contact Enrichment",  href: "/org/contact-enrichment",  icon: Contact },
+      { label: "Agent Monitoring", href: "/org/agents", icon: Bot },
+      { label: "Knowledge Base", href: "/org/knowledge-base", icon: Library },
       { label: "Outreach",       href: "/outreach",   icon: Telescope },
       { label: "Audit Log",      href: "/audit",      icon: Shield },
     ],
@@ -45,6 +56,16 @@ export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
   const { data: pending = [] } = usePendingApprovals();
   const pendingCount = pending.length;
+
+  const { data: agents = [] } = useAgentStatus();
+  const activeAgents = agents.filter((a) => a.status === "running");
+  const activeCount = activeAgents.length;
+  const activeNames =
+    activeAgents.length > 0
+      ? activeAgents.slice(0, 3).map((a) => a.name).join(" · ")
+      : agents.length > 0
+        ? "All agents idle"
+        : "No agents reporting";
 
   return (
     <motion.aside
@@ -169,11 +190,20 @@ export function Sidebar() {
             <div className="flex items-center gap-2 rounded-md bg-sidebar-accent/40 px-2.5 py-2">
               <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10">
                 <Bot className="h-3.5 w-3.5 text-primary" />
-                <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-emerald-400 ring-1 ring-sidebar agent-pulse" />
+                <span
+                  className={cn(
+                    "absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-sidebar",
+                    activeCount > 0 ? "bg-emerald-500 agent-pulse" : "bg-muted-foreground/40",
+                  )}
+                />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="truncate text-[11px] font-semibold text-sidebar-foreground">3 agents active</p>
-                <p className="truncate text-[10px] text-muted-foreground">Screening · Identity · Compliance</p>
+                <p className="truncate text-[11px] font-semibold text-sidebar-foreground">
+                  {activeCount > 0
+                    ? `${activeCount} agent${activeCount > 1 ? "s" : ""} active`
+                    : "Agents idle"}
+                </p>
+                <p className="truncate text-[10px] text-muted-foreground">{activeNames}</p>
               </div>
             </div>
           </motion.div>

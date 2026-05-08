@@ -165,7 +165,7 @@ export default function ForCandidatesPage() {
           </div>
           <div className="mt-8 text-center">
             <Button className="gap-2 glow-blue" size="lg" asChild>
-              <Link href="/candidate-signup">Start Now — It's Free <ArrowRight className="h-4 w-4" /></Link>
+              <Link href="/candidate-signup">Start Now — It&apos;s Free <ArrowRight className="h-4 w-4" /></Link>
             </Button>
           </div>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -52,11 +52,13 @@ export default function InterviewRunPage({
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState<"idle" | "evaluating">("idle");
+  const seeded = useRef(false);
 
   // Seed queue from server on first load.
   useEffect(() => {
     if (!data) return;
-    if (queue.length === 0 && data.questions.length > 0 && data.turns.length === 0) {
+    if (!seeded.current && data.questions.length > 0 && data.turns.length === 0) {
+      seeded.current = true;
       setQueue(
         data.questions.map((q) => ({
           text: q.text,
@@ -64,7 +66,7 @@ export default function InterviewRunPage({
         })),
       );
     }
-  }, [data, queue.length]);
+  }, [data]);
 
   const askedIndexes = useMemo(
     () => new Set(data?.turns.map((t) => t.index) ?? []),

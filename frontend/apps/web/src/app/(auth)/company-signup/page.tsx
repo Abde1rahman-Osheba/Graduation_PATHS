@@ -177,7 +177,9 @@ export default function CompanySignupPage() {
     try {
       setSuccessPhase(true);
       await login(data.work_email.trim(), data.password);
-      router.replace("/dashboard");
+      // New companies always start in PENDING_APPROVAL — route to the
+      // pending screen so the user knows their request is being reviewed.
+      router.replace("/pending-approval");
     } catch (e) {
       setSuccessPhase(false);
       setError(
@@ -259,7 +261,7 @@ export default function CompanySignupPage() {
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-white/10 bg-navy-900/85 p-6 shadow-2xl backdrop-blur-md sm:p-8"
+            className="rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8"
           >
             <div className="mb-6 space-y-1">
               <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">
@@ -296,7 +298,7 @@ export default function CompanySignupPage() {
                     autoComplete="name"
                     placeholder="Your name"
                     {...register("full_name")}
-                    className={cn("h-10 rounded-xl border-white/10 bg-navy-950/50", errors.full_name && "border-destructive")}
+                    className={cn("h-10 rounded-xl border-border bg-input", errors.full_name && "border-destructive")}
                   />
                   {errors.full_name && (
                     <p className="text-xs text-destructive">{errors.full_name.message}</p>
@@ -311,7 +313,7 @@ export default function CompanySignupPage() {
                     autoComplete="email"
                     placeholder="you@company.com"
                     {...register("work_email")}
-                    className={cn("h-10 rounded-xl border-white/10 bg-navy-950/50", errors.work_email && "border-destructive")}
+                    className={cn("h-10 rounded-xl border-border bg-input", errors.work_email && "border-destructive")}
                   />
                   {errors.work_email && (
                     <p className="text-xs text-destructive">{errors.work_email.message}</p>
@@ -326,7 +328,7 @@ export default function CompanySignupPage() {
                       type={showPassword ? "text" : "password"}
                       autoComplete="new-password"
                       {...register("password")}
-                      className={cn("h-10 rounded-xl border-white/10 bg-navy-950/50 pr-10", errors.password && "border-destructive")}
+                      className={cn("h-10 rounded-xl border-border bg-input pr-10", errors.password && "border-destructive")}
                     />
                     <button
                       type="button"
@@ -349,7 +351,7 @@ export default function CompanySignupPage() {
                       type={showConfirm ? "text" : "password"}
                       autoComplete="new-password"
                       {...register("confirm_password")}
-                      className={cn("h-10 rounded-xl border-white/10 bg-navy-950/50 pr-10", errors.confirm_password && "border-destructive")}
+                      className={cn("h-10 rounded-xl border-border bg-input pr-10", errors.confirm_password && "border-destructive")}
                     />
                     <button
                       type="button"
@@ -371,7 +373,7 @@ export default function CompanySignupPage() {
                     autoComplete="organization"
                     placeholder="Acme Inc."
                     {...register("company_name")}
-                    className={cn("h-10 rounded-xl border-white/10 bg-navy-950/50", errors.company_name && "border-destructive")}
+                    className={cn("h-10 rounded-xl border-border bg-input", errors.company_name && "border-destructive")}
                   />
                   {errors.company_name && (
                     <p className="text-xs text-destructive">{errors.company_name.message}</p>
@@ -386,7 +388,7 @@ export default function CompanySignupPage() {
                     id="organization_slug"
                     placeholder="acme-inc"
                     {...register("organization_slug")}
-                    className={cn("h-10 rounded-xl border-white/10 bg-navy-950/50 font-mono text-sm", errors.organization_slug && "border-destructive")}
+                    className={cn("h-10 rounded-xl border-border bg-input font-mono text-sm", errors.organization_slug && "border-destructive")}
                   />
                   <p className="text-[11px] text-muted-foreground">Lowercase identifier for your workspace. Auto-filled from the company name; you can edit it.</p>
                   {errors.organization_slug && (
@@ -403,7 +405,7 @@ export default function CompanySignupPage() {
                     type="url"
                     placeholder="https://company.com"
                     {...register("company_website")}
-                    className="h-10 rounded-xl border-white/10 bg-navy-950/50"
+                    className="h-10 rounded-xl border-border bg-input"
                   />
                 </div>
 
@@ -413,7 +415,7 @@ export default function CompanySignupPage() {
                     id="job_title"
                     placeholder="e.g. Head of Talent"
                     {...register("job_title")}
-                    className={cn("h-10 rounded-xl border-white/10 bg-navy-950/50", errors.job_title && "border-destructive")}
+                    className={cn("h-10 rounded-xl border-border bg-input", errors.job_title && "border-destructive")}
                   />
                   {errors.job_title && (
                     <p className="text-xs text-destructive">{errors.job_title.message}</p>
@@ -426,7 +428,7 @@ export default function CompanySignupPage() {
                     id="company_size"
                     {...register("company_size")}
                     className={cn(
-                      "flex h-10 w-full rounded-xl border border-white/10 bg-navy-950/50 px-3 text-sm text-foreground",
+                      "flex h-10 w-full rounded-xl border border-border bg-input px-3 text-sm text-foreground",
                       errors.company_size && "border-destructive",
                     )}
                   >
@@ -446,7 +448,7 @@ export default function CompanySignupPage() {
                     id="industry"
                     {...register("industry")}
                     className={cn(
-                      "flex h-10 w-full rounded-xl border border-white/10 bg-navy-950/50 px-3 text-sm text-foreground",
+                      "flex h-10 w-full rounded-xl border border-border bg-input px-3 text-sm text-foreground",
                       errors.industry && "border-destructive",
                     )}
                   >
@@ -469,7 +471,7 @@ export default function CompanySignupPage() {
                     type="tel"
                     autoComplete="tel"
                     {...register("phone")}
-                    className="h-10 rounded-xl border-white/10 bg-navy-950/50"
+                    className="h-10 rounded-xl border-border bg-input"
                   />
                 </div>
               </div>

@@ -5,29 +5,32 @@ import { persist } from "zustand/middleware";
 import type { User } from "@/types";
 import { loginApi } from "@/lib/api/auth.api";
 
-// ── Mock fallback (used when backend is unavailable) ──────────────────────
-const mockUser: User = {
-  id: "user_01",
-  email: "ahmed@techcorp.io",
-  name: "Ahmed Hassan",
-  avatar: "https://api.dicebear.com/9.x/avataaars/svg?seed=ahmed",
-  role: "admin",
-  accountType: "organization_member",
-  orgId: "org_01",
-  orgName: "TechCorp Egypt",
-  createdAt: "2025-06-01T09:00:00Z",
-  lastLogin: "2026-02-12T09:00:00Z",
-  mfaEnabled: false,
-  status: "active",
-};
-
-/** Re-read onboarding draft from storage for the user id now in `paths-auth`. */
+/**
+ * Re-read the onboarding draft from storage for the user id now persisted
+ * in `paths-auth`. Drafts are namespaced by user id so distinct users do
+ * not share the same in-progress profile.
+ */
 function syncOnboardingDraftWithSession() {
   queueMicrotask(() => {
     void import("@/lib/stores/onboarding.store").then(({ useOnboardingStore }) => {
       void useOnboardingStore.persist.rehydrate();
     });
   });
+}
+
+/**
+ * Mirror the session into a non-sensitive cookie that Next.js middleware can
+ * read at the edge. The cookie does NOT carry the JWT — only a presence flag
+ * (`paths-session=1`). All authoritative checks still run server-side via
+ * /api/v1/* on the backend.
+ */
+function setSessionCookie(present: boolean) {
+  if (typeof document === "undefined") return;
+  if (present) {
+    document.cookie = "paths-session=1; Path=/; SameSite=Lax; Max-Age=86400";
+  } else {
+    document.cookie = "paths-session=; Path=/; SameSite=Lax; Max-Age=0";
+  }
 }
 
 interface AuthState {
@@ -51,64 +54,41 @@ export const useAuthStore = create<AuthState>()(
       isLoading: false,
       _hasHydrated: false,
 
+      // Real-backend login. There is intentionally NO demo fallback path:
+      // a previous NEXT_PUBLIC_ALLOW_DEMO_LOGIN code path used to grant a
+      // hardcoded `admin` user when the backend rejected the credentials,
+      // which is a privilege-escalation footgun. It was removed during the
+      // platform-admin rollout.
       login: async (email: string, password: string) => {
         set({ isLoading: true });
 
         const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-
-        if (apiUrl) {
-          // ── Real backend login ──────────────────────────────────────────
-          try {
-            const { user, token } = await loginApi(email, password);
-            set({
-              user: user as unknown as User,
-              token,
-              isAuthenticated: true,
-              isLoading: false,
-            });
-            syncOnboardingDraftWithSession();
-            return;
-          } catch (err) {
-            // Optional demo fallback: set NEXT_PUBLIC_ALLOW_DEMO_LOGIN=true
-            // Never use mock-token by default — protected APIs (e.g. interviews)
-            // require a real JWT and otherwise show "Could not validate credentials".
-            const allowDemoFallback =
-              process.env.NEXT_PUBLIC_ALLOW_DEMO_LOGIN === "true";
-            const isAuthError =
-              err instanceof Error &&
-              (err.message.toLowerCase().includes("invalid") ||
-                err.message.toLowerCase().includes("incorrect") ||
-                err.message.toLowerCase().includes("credentials") ||
-                err.message.toLowerCase().includes("password") ||
-                err.message.toLowerCase().includes("not found") ||
-                (err as { status?: number }).status === 401 ||
-                (err as { status?: number }).status === 403);
-
-            if (allowDemoFallback && isAuthError) {
-              await new Promise((r) => setTimeout(r, 600));
-              set({
-                user: { ...mockUser, email },
-                token: "mock-token",
-                isAuthenticated: true,
-                isLoading: false,
-              });
-              syncOnboardingDraftWithSession();
-              return;
-            }
-
-            set({ isLoading: false });
-            throw err;
-          }
+        if (!apiUrl) {
+          set({ isLoading: false });
+          throw new Error(
+            "NEXT_PUBLIC_API_URL is not set. Configure the API base URL to sign in.",
+          );
         }
 
-        set({ isLoading: false });
-        throw new Error(
-          "NEXT_PUBLIC_API_URL is not set. Configure the API base URL to sign in.",
-        );
+        try {
+          const { user, token } = await loginApi(email, password);
+          set({
+            user: user as unknown as User,
+            token,
+            isAuthenticated: true,
+            isLoading: false,
+          });
+          setSessionCookie(true);
+          syncOnboardingDraftWithSession();
+        } catch (err) {
+          set({ isLoading: false });
+          throw err;
+        }
       },
 
       logout: () => {
         set({ user: null, token: null, isAuthenticated: false });
+        setSessionCookie(false);
       },
 
       setUser: (user) => set({ user, isAuthenticated: true }),
@@ -123,6 +103,10 @@ export const useAuthStore = create<AuthState>()(
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
+        // Re-sync the cookie based on what rehydrated from localStorage.
+        if (typeof document !== "undefined") {
+          setSessionCookie(!!state?.isAuthenticated);
+        }
       },
     },
   ),

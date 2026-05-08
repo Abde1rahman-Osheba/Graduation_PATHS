@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -25,10 +25,15 @@ const features = [
   { icon: Users, label: "HITL Approvals", sub: "AI proposes, humans decide" },
 ];
 
-export default function LoginPage() {
-  const router = useRouter();
+function LoginForm() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
   const { login, isLoading } = useAuthStore();
   const [showPassword, setShowPassword] = useState(false);
+
+  // Accept both ?next= (middleware convention) and ?redirectTo= (our intent flow)
+  const redirectAfterLogin =
+    searchParams.get("next") ?? searchParams.get("redirectTo") ?? null;
 
   const {
     register, handleSubmit, formState: { errors },
@@ -37,6 +42,31 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginForm) => {
     await login(data.email, data.password);
     const u = useAuthStore.getState().user;
+
+    // 1. Platform admin → /admin. This overrides any ?next=/redirectTo so a
+    //    forged redirect can't land them in a non-admin context.
+    if (u?.isPlatformAdmin || u?.accountType === "platform_admin") {
+      router.push("/admin");
+      return;
+    }
+
+    // 2. Org member with non-active org status → pending or rejected screen.
+    if (u?.accountType === "organization_member") {
+      if (u.organizationStatus === "pending_approval") {
+        router.push("/pending-approval");
+        return;
+      }
+      if (u.organizationStatus === "rejected" || u.organizationStatus === "suspended") {
+        router.push("/rejected");
+        return;
+      }
+    }
+
+    // 3. Honour any pending redirect (e.g. from Apply button or protected route)
+    if (redirectAfterLogin) {
+      router.push(redirectAfterLogin);
+      return;
+    }
     if (u?.accountType === "candidate" || u?.role === "candidate") {
       router.push("/candidate/dashboard");
       return;
@@ -197,5 +227,13 @@ export default function LoginPage() {
         </motion.div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }

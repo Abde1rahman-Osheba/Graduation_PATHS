@@ -68,6 +68,7 @@ export const useOnboardingStore = create<OnboardingState>()(
       completedSteps: new Set<OnboardingStep>(),
       isSubmitting: false,
       lastSavedAt: null,
+      postOnboardingRedirect: null,
 
       setStep: (step) => set({ currentStep: step }),
 
@@ -84,6 +85,8 @@ export const useOnboardingStore = create<OnboardingState>()(
       saveDraft: async () => {
         set({ lastSavedAt: new Date().toISOString() });
       },
+
+      setPostOnboardingRedirect: (url) => set({ postOnboardingRedirect: url }),
 
       submitProfile: async () => {
         set({ isSubmitting: true });
@@ -116,6 +119,7 @@ export const useOnboardingStore = create<OnboardingState>()(
           completedSteps: new Set(),
           isSubmitting: false,
           lastSavedAt: null,
+          postOnboardingRedirect: null,
         }),
     }),
     {
@@ -126,6 +130,7 @@ export const useOnboardingStore = create<OnboardingState>()(
         currentStep: s.currentStep,
         completedSteps: [...s.completedSteps],
         lastSavedAt: s.lastSavedAt,
+        postOnboardingRedirect: s.postOnboardingRedirect,
       }),
       onRehydrateStorage: () => (state) => {
         if (state && Array.isArray(state.completedSteps)) {

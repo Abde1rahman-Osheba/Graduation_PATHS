@@ -378,6 +378,14 @@ export const candidatePortalApi = {
   }) => api.put<BackendCandidateProfileOut>("/api/v1/candidates/me/profile", body),
   getApplications: () =>
     api.get<BackendCandidateAppOut[]>("/api/v1/candidates/me/applications"),
+  applyToJob: (jobId: string) =>
+    api.post<{ id: string; job_id: string; stage: string; message: string }>(
+      `/api/v1/candidates/me/jobs/${jobId}/apply`,
+    ),
+  getApplicationStatus: (jobId: string) =>
+    api.get<{ applied: boolean; application_id: string | null; stage: string | null }>(
+      `/api/v1/candidates/me/jobs/${jobId}/application-status`,
+    ),
 };
 
 // ── Public Jobs (no auth) ─────────────────────────────────────────────────
@@ -443,6 +451,36 @@ export interface BackendShortlistProposeOut {
   message: string;
 }
 
+export interface BackendBiasFlagOut {
+  id: string;
+  scope: string;
+  scope_id: string;
+  rule: string;
+  severity: string;
+  status: string;
+  detail: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+export interface BackendBiasAuditOut {
+  id: number;
+  event_type: string;
+  candidate_id: string | null;
+  job_id: string | null;
+  actor_id: string | null;
+  detail_json: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface BackendAnonymizedViewOut {
+  id: string;
+  candidate_id: string;
+  view_version: number;
+  view_json: Record<string, unknown>;
+  stripped_fields: string[] | null;
+  created_at: string | null;
+}
+
 export const biasFairnessApi = {
   requestDeanon: (candidateId: string, purpose = "outreach") =>
     api.post<BackendDeAnonEvent>(`/api/v1/candidates/${candidateId}/deanonymize`, { purpose }),
@@ -450,6 +488,184 @@ export const biasFairnessApi = {
     api.get<BackendDeAnonEvent | null>(`/api/v1/candidates/${candidateId}/deanon-status`),
   proposeShortlist: (jobId: string) =>
     api.post<BackendShortlistProposeOut>(`/api/v1/jobs/${jobId}/shortlist/propose`, {}),
+  getAnonymizedView: (candidateId: string) =>
+    api.get<BackendAnonymizedViewOut>(`/api/v1/candidates/${candidateId}/anonymized`),
+  listBiasFlags: (params?: { status?: string; scope?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.scope) q.set("scope", params.scope);
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return api.get<BackendBiasFlagOut[]>(`/api/v1/bias/flags${qs ? `?${qs}` : ""}`);
+  },
+  readBiasAudit: (params?: { event_type?: string; candidate_id?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.event_type) q.set("event_type", params.event_type);
+    if (params?.candidate_id) q.set("candidate_id", params.candidate_id);
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return api.get<BackendBiasAuditOut[]>(`/api/v1/bias/audit${qs ? `?${qs}` : ""}`);
+  },
+};
+
+// ── Knowledge Base / Vector Store ──────────────────────────────────────────
+
+export interface BackendQdrantCollection {
+  name: string;
+  status: string;
+  vectors_count: number | null;
+  dimension: number | null;
+}
+
+export interface BackendDocumentChunk {
+  id: string;
+  content: string;
+  score: number;
+  source: string;
+  metadata: Record<string, unknown>;
+}
+
+export const kbApi = {
+  listCollections: () =>
+    api.get<{ collections: string[] }>("/api/v1/system/qdrant/collections"),
+  getCollection: (name: string) =>
+    api.get<BackendQdrantCollection>(
+      `/api/v1/system/qdrant/collections/${encodeURIComponent(name)}`,
+    ),
+  initCollections: () =>
+    api.post<{ status: string; collection: string; action: string }>(
+      "/api/v1/system/qdrant/init-collections",
+    ),
+};
+
+// ── Identity Resolution ────────────────────────────────────────────────────
+
+export interface BackendDuplicateOut {
+  id: string;
+  candidate_id_a: string;
+  candidate_id_b: string;
+  organization_id: string;
+  match_reason: string;
+  match_value: string;
+  confidence: number;
+  status: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  notes: string | null;
+  merged_into_candidate_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface BackendDuplicateListOut {
+  organization_id: string;
+  total: number;
+  items: BackendDuplicateOut[];
+}
+
+export interface BackendMergeHistoryOut {
+  id: string;
+  organization_id: string;
+  kept_candidate_id: string;
+  removed_candidate_id: string;
+  merged_by: string;
+  merged_at: string | null;
+  merge_reason: string | null;
+  audit_log: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+export interface BackendMergeHistoryListOut {
+  organization_id: string;
+  total: number;
+  items: BackendMergeHistoryOut[];
+}
+
+export interface BackendScanResult {
+  organization_id: string;
+  scanned: boolean;
+  new_duplicates_found: number;
+}
+
+export const identityResolutionApi = {
+  scan: () =>
+    api.post<BackendScanResult>("/api/v1/identity-resolution/scan"),
+  listDuplicates: (status?: string) =>
+    api.get<BackendDuplicateListOut>(
+      `/api/v1/identity-resolution/duplicates${status ? `?status=${status}` : ""}`,
+    ),
+  approveMerge: (id: string, notes?: string) =>
+    api.post<BackendDuplicateOut>(`/api/v1/identity-resolution/duplicates/${id}/approve`, notes ? { notes } : {}),
+  rejectMerge: (id: string, notes?: string) =>
+    api.post<BackendDuplicateOut>(`/api/v1/identity-resolution/duplicates/${id}/reject`, notes ? { notes } : {}),
+  getMergeHistory: () =>
+    api.get<BackendMergeHistoryListOut>("/api/v1/identity-resolution/merge-history"),
+};
+
+// ── Assessment Agent ─────────────────────────────────────────────────────
+
+export interface BackendAssessmentOut {
+  id: string;
+  organization_id: string;
+  application_id: string;
+  candidate_id: string;
+  job_id: string;
+  title: string;
+  assessment_type: string;
+  status: string;
+  score: number | null;
+  max_score: number | null;
+  score_percent: number | null;
+  instructions: string | null;
+  submission_text: string | null;
+  submission_uri: string | null;
+  reviewer_notes: string | null;
+  criteria_breakdown: Record<string, unknown> | null;
+  assigned_at: string | null;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  created_at: string | null;
+}
+
+export interface BackendAssessmentCreateBody {
+  application_id: string;
+  candidate_id: string;
+  job_id: string;
+  title?: string;
+  assessment_type?: string;
+  instructions?: string | null;
+  max_score?: number | null;
+}
+
+export interface BackendAssessmentUpdateBody {
+  title?: string;
+  status?: string;
+  score?: number | null;
+  max_score?: number | null;
+  reviewer_notes?: string | null;
+  criteria_breakdown?: Record<string, unknown> | null;
+  submission_text?: string | null;
+  submission_uri?: string | null;
+}
+
+export const assessmentsApi = {
+  list: (params?: { application_id?: string; candidate_id?: string; status?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.application_id) q.set("application_id", params.application_id);
+    if (params?.candidate_id) q.set("candidate_id", params.candidate_id);
+    if (params?.status) q.set("status", params.status);
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return api.get<BackendAssessmentOut[]>(`/api/v1/assessments${qs ? `?${qs}` : ""}`);
+  },
+  get: (id: string) =>
+    api.get<BackendAssessmentOut>(`/api/v1/assessments/${id}`),
+  create: (body: BackendAssessmentCreateBody) =>
+    api.post<BackendAssessmentOut>("/api/v1/assessments", body),
+  update: (id: string, body: BackendAssessmentUpdateBody) =>
+    api.patch<BackendAssessmentOut>(`/api/v1/assessments/${id}`, body),
+  delete: (id: string) =>
+    api.delete<void>(`/api/v1/assessments/${id}`),
 };
 
 // ── Decision Support System ───────────────────────────────────────────────
@@ -1155,6 +1371,7 @@ export interface BackendMatchingRun {
   id?: string;
   job_id?: string;
   top_k?: number;
+  status?: string;
   total_candidates?: number;
   relevant_candidates?: number;
   scored_candidates?: number;
@@ -1405,5 +1622,58 @@ export const orgMatchingApi = {
     api.post<{ ok: boolean }>(
       `/api/v1/organization-matching/outreach/${messageId}/send`,
       body,
+    ),
+};
+
+// ── Contact Enrichment ───────────────────────────────────────────────────
+
+export interface BackendEnrichedContactOut {
+  id: string;
+  candidate_id: string;
+  organization_id: string;
+  contact_type: string;
+  original_value: string;
+  enriched_value: string | null;
+  confidence: number;
+  status: string;
+  source: string;
+  provenance: string | null;
+  validated_at: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface BackendEnrichmentStatusOut {
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  by_type: Record<string, number>;
+  by_status: Record<string, number>;
+}
+
+export const contactEnrichmentApi = {
+  status: () =>
+    api.get<BackendEnrichmentStatusOut>("/api/v1/contact-enrichment/status"),
+  list: (params?: { status?: string; contact_type?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.status) sp.set("status", params.status);
+    if (params?.contact_type) sp.set("contact_type", params.contact_type);
+    const q = sp.toString();
+    return api.get<BackendEnrichedContactOut[]>(
+      `/api/v1/contact-enrichment/contacts${q ? `?${q}` : ""}`,
+    );
+  },
+  approve: (id: string, body?: { reviewer_name?: string }) =>
+    api.post<BackendEnrichedContactOut>(
+      `/api/v1/contact-enrichment/contacts/${id}/approve`,
+      body ?? {},
+    ),
+  reject: (id: string, body?: { reviewer_name?: string }) =>
+    api.post<BackendEnrichedContactOut>(
+      `/api/v1/contact-enrichment/contacts/${id}/reject`,
+      body ?? {},
     ),
 };

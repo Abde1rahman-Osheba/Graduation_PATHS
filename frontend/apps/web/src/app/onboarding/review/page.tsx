@@ -52,7 +52,7 @@ function Row({ label, value }: { label: string; value?: string | null }) {
 export default function ReviewPage() {
   const router = useRouter();
   const qc = useQueryClient();
-  const { draft, completedSteps, submitProfile, markStepComplete } = useOnboardingStore();
+  const { draft, completedSteps, submitProfile, markStepComplete, postOnboardingRedirect, setPostOnboardingRedirect } = useOnboardingStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,7 +67,13 @@ export default function ReviewPage() {
       await submitProfile();
       await qc.invalidateQueries({ queryKey: ["candidate-profile"] });
       await qc.invalidateQueries({ queryKey: ["candidate-applications"] });
-      router.push(`/candidate/dashboard`);
+
+      // Honour the intent URL captured at the start of onboarding (e.g. the
+      // job page that originally triggered the signup flow). Clear it first so
+      // a second visit to the review page doesn't reuse a stale redirect.
+      const destination = postOnboardingRedirect ?? "/candidate/dashboard";
+      setPostOnboardingRedirect(null);
+      router.push(destination);
     } catch {
       setError("Something went wrong. Please try again.");
       setIsSubmitting(false);

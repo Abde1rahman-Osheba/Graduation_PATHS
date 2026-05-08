@@ -9,10 +9,12 @@ export interface BackendUser {
   email: string;
   full_name: string;
   account_type: string;
+  is_platform_admin?: boolean;
   organization?: {
     organization_id: string;
     organization_name: string;
     role_code: string;
+    status?: string;
   } | null;
 }
 
@@ -35,11 +37,16 @@ export function mapBackendUser(backendUser: BackendUser, token: string) {
     interviewer: "interviewer",
     candidate: "candidate",
   };
-  const role = org
-    ? (roleMap[org.role_code] ?? "recruiter")
-    : backendUser.account_type === "candidate"
-    ? "candidate"
-    : "recruiter";
+  let role: string;
+  if (backendUser.account_type === "platform_admin" || backendUser.is_platform_admin) {
+    role = "super_admin";
+  } else if (org) {
+    role = roleMap[org.role_code] ?? "recruiter";
+  } else if (backendUser.account_type === "candidate") {
+    role = "candidate";
+  } else {
+    role = "recruiter";
+  }
 
   return {
     id: backendUser.id,
@@ -47,6 +54,14 @@ export function mapBackendUser(backendUser: BackendUser, token: string) {
     name: backendUser.full_name,
     role,
     accountType: backendUser.account_type,
+    isPlatformAdmin: !!backendUser.is_platform_admin || backendUser.account_type === "platform_admin",
+    organizationStatus: (org?.status as
+      | "pending_approval"
+      | "active"
+      | "rejected"
+      | "suspended"
+      | undefined) ?? null,
+    permissions: [] as string[],
     orgId: org?.organization_id ?? "",
     orgName: org?.organization_name ?? "",
     avatar: `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(backendUser.email)}`,

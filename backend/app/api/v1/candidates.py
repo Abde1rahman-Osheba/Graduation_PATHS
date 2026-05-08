@@ -128,6 +128,106 @@ async def get_my_applications(
     return result
 
 
+@router.post("/me/jobs/{job_id}/apply", status_code=201)
+async def apply_to_job(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Candidate submits a direct application for a job.
+
+    Returns 201 on success, 403 for wrong role, 404 for missing profile/job,
+    409 when already applied.
+    """
+    if current_user.account_type != "candidate":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only candidate accounts can apply for jobs",
+        )
+
+    cand = current_user.candidate_profile
+    if not cand:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Candidate profile not found. Please complete your profile first.",
+        )
+
+    # Verify the job exists and is accepting applications
+    job = db.get(JobModel, job_id)
+    if not job or not job.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found or no longer accepting applications",
+        )
+
+    # Duplicate check — 409 Conflict
+    existing = db.execute(
+        select(Application).where(
+            Application.candidate_id == cand.id,
+            Application.job_id == job_id,
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have already applied for this job",
+        )
+
+    new_app = Application(
+        candidate_id=cand.id,
+        job_id=job_id,
+        application_type="direct",
+        source_channel="candidate_portal",
+        current_stage_code="applied",
+        overall_status="active",
+    )
+    db.add(new_app)
+    db.commit()
+    db.refresh(new_app)
+
+    return {
+        "id": str(new_app.id),
+        "job_id": str(job_id),
+        "stage": "applied",
+        "message": "Application submitted successfully",
+    }
+
+
+@router.get("/me/jobs/{job_id}/application-status")
+async def get_job_application_status(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Check whether the current candidate has already applied to a job."""
+    if current_user.account_type != "candidate":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only candidate accounts can check application status",
+        )
+
+    cand = current_user.candidate_profile
+    if not cand:
+        return {"applied": False, "application_id": None, "stage": None}
+
+    existing = db.execute(
+        select(Application).where(
+            Application.candidate_id == cand.id,
+            Application.job_id == job_id,
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        return {
+            "applied": True,
+            "application_id": str(existing.id),
+            "stage": existing.current_stage_code,
+        }
+
+    return {"applied": False, "application_id": None, "stage": None}
+
+
 def _ensure_can_read_candidate(
     db: Session,
     current_user: User,

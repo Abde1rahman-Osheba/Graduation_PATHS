@@ -13,7 +13,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useCandidate, useApplications, useEvidenceItems, useCandidateSources, useDeanonStatus, useRequestDeanon, useCreateInterviewSession } from "@/lib/hooks";
+import { useCandidate, useApplications, useEvidenceItems, useCandidateSources, useDeanonStatus, useRequestDeanon, useCreateInterviewSession, useBiasFlags, useContactEnrichmentStatus } from "@/lib/hooks";
 import { OutreachModal } from "@/components/outreach/outreach-modal";
 import { useAuthStore } from "@/lib/stores/auth.store";
 import { Sparkles, Loader2 } from "lucide-react";
@@ -76,6 +76,9 @@ export default function CandidateProfilePage({ params }: { params: Promise<{ id:
     role === "lead";
 
   const deanonPending = deanonStatus?.granted_at == null && deanonStatus?.denied_at == null && deanonStatus != null;
+  const { data: allFlags = [] } = useBiasFlags({ scope: "candidate" });
+  const candidateBiasFlags = allFlags.filter((f) => f.scope_id === id);
+  const { data: enrichmentStatus } = useContactEnrichmentStatus();
 
   if (isLoading) {
     return (
@@ -263,6 +266,37 @@ export default function CandidateProfilePage({ params }: { params: Promise<{ id:
                 ))
             }
           </div>
+
+          {/* Bias flags */}
+          {candidateBiasFlags.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {candidateBiasFlags.map((flag) => (
+                <div key={flag.id} className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-400">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <span>{flag.rule.replace(/_/g, " ")}</span>
+                  <span className="text-[10px] text-amber-500/70 ml-auto">{flag.severity}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Contact enrichment status */}
+          {enrichmentStatus && enrichmentStatus.total > 0 && (
+            <div className="mt-3 flex items-center gap-2">
+              {enrichmentStatus.pending > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-1 text-[11px] font-medium text-amber-400">
+                  <Clock className="h-3 w-3" />
+                  {enrichmentStatus.pending} pending contact{enrichmentStatus.pending !== 1 ? "s" : ""}
+                </span>
+              )}
+              {enrichmentStatus.approved > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-1 text-[11px] font-medium text-emerald-400">
+                  <CheckCircle2 className="h-3 w-3" />
+                  {enrichmentStatus.approved} approved contact{enrichmentStatus.approved !== 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+          )}
         </motion.div>
 
         {/* Main content tabs */}
@@ -281,11 +315,11 @@ export default function CandidateProfilePage({ params }: { params: Promise<{ id:
                 <h3 className="font-heading text-sm font-semibold text-foreground mb-4">Skill Radar</h3>
                 <ResponsiveContainer width="100%" height={220}>
                   <RadarChart data={radarData}>
-                    <PolarGrid stroke="oklch(0.28 0.018 252 / 40%)" />
-                    <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: "oklch(0.55 0.018 252)" }} />
+                    <PolarGrid stroke="var(--border)" />
+                    <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
                     <Radar
                       name="Proficiency" dataKey="value"
-                      stroke="oklch(0.62 0.22 264)" fill="oklch(0.62 0.22 264)" fillOpacity={0.2}
+                      stroke="var(--primary)" fill="var(--primary)" fillOpacity={0.18}
                     />
                   </RadarChart>
                 </ResponsiveContainer>
@@ -404,36 +438,63 @@ export default function CandidateProfilePage({ params }: { params: Promise<{ id:
           {/* Applications */}
           <TabsContent value="applications" className="mt-4">
             <div className="space-y-3">
-              {candidateApps.map((app) => (
-                <div key={app.id} className="glass rounded-xl p-4 flex items-center justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-semibold text-foreground">{app.job.title}</p>
-                      <Badge variant="outline" className="text-[10px]">{app.job.level}</Badge>
-                    </div>
-                    <p className="text-[12px] text-muted-foreground mt-0.5">
-                      Applied {shortDate(app.applyDate)} · via {app.sourcePlatform}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4 shrink-0">
-                    {app.matchScore && (
-                      <div className="text-right">
-                        <p className={cn(
-                          "font-mono text-lg font-bold",
-                          app.matchScore >= 80 ? "text-emerald-400" :
-                          app.matchScore >= 60 ? "text-amber-400" : "text-red-400"
-                        )}>{app.matchScore}%</p>
-                        <p className="text-[10px] text-muted-foreground">match score</p>
+              {candidateApps.map((app) => {
+                const stageOrder = ["sourced", "applied", "screened", "interview", "decision", "offer"];
+                const currentStageIdx = app.status ? stageOrder.indexOf(app.status.toLowerCase()) : -1;
+                return (
+                  <div key={app.id} className="glass rounded-xl p-5 space-y-3">
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold text-foreground">{app.job.title}</p>
+                          <Badge variant="outline" className="text-[10px]">{app.job.level}</Badge>
+                        </div>
+                        <p className="text-[12px] text-muted-foreground mt-0.5">
+                          Applied {shortDate(app.applyDate)} · via {app.sourcePlatform}
+                        </p>
                       </div>
-                    )}
-                    <Link href={`/jobs/${app.jobId}/screening`}>
-                      <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs">
-                        View in Job <ChevronRight className="h-3 w-3" />
-                      </Button>
-                    </Link>
+                      <div className="flex items-center gap-4 shrink-0">
+                        {app.matchScore && (
+                          <div className="text-right">
+                            <p className={cn(
+                              "font-mono text-lg font-bold",
+                              app.matchScore >= 80 ? "text-emerald-400" :
+                              app.matchScore >= 60 ? "text-amber-400" : "text-red-400"
+                            )}>{app.matchScore}%</p>
+                            <p className="text-[10px] text-muted-foreground">match score</p>
+                          </div>
+                        )}
+                        <Link href={`/jobs/${app.jobId}/screening`}>
+                          <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs">
+                            View in Job <ChevronRight className="h-3 w-3" />
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
+                    {/* Stage pipeline */}
+                    <div className="flex items-center gap-1.5">
+                      {stageOrder.map((stage, i) => (
+                        <div key={stage} className="flex items-center gap-1.5 flex-1">
+                          <div className={cn(
+                            "flex h-6 w-full items-center justify-center rounded text-[9px] font-semibold uppercase tracking-wider",
+                            i <= currentStageIdx
+                              ? "bg-primary/15 text-primary"
+                              : "bg-muted/30 text-muted-foreground/40",
+                          )}>
+                            {stage}
+                          </div>
+                          {i < stageOrder.length - 1 && (
+                            <div className={cn(
+                              "h-px w-2 shrink-0",
+                              i < currentStageIdx ? "bg-primary/30" : "bg-border/30",
+                            )} />
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {candidateApps.length === 0 && (
                 <div className="rounded-xl border border-dashed border-border/40 p-12 text-center">
                   <p className="text-sm text-muted-foreground">No applications found for this candidate.</p>

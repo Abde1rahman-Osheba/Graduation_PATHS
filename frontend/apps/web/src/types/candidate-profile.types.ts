@@ -189,6 +189,8 @@ export interface OnboardingState {
   completedSteps: Set<OnboardingStep>;
   isSubmitting: boolean;
   lastSavedAt: string | null;
+  /** URL to redirect to after onboarding completes (e.g. the job page that triggered signup) */
+  postOnboardingRedirect: string | null;
 
   // Actions
   setStep: (step: OnboardingStep) => void;
@@ -196,5 +198,6 @@ export interface OnboardingState {
   updateDraft: (patch: Partial<OnboardingDraft>) => void;
   saveDraft: () => Promise<void>;
   submitProfile: () => Promise<string>; // returns candidate ID
+  setPostOnboardingRedirect: (url: string | null) => void;
   reset: () => void;
 }

@@ -52,9 +52,7 @@ export default function SourcingPage() {
   const [shortlistedKeys, setShortlistedKeys] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (jobs.length && !selectedJobId) setSelectedJobId(String(jobs[0].id));
-  }, [jobs, selectedJobId]);
+  const resolvedSelectedJobId = selectedJobId || (jobs.length > 0 ? String(jobs[0].id) : "");
 
   const skillList = useMemo(
     () => skills.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean),
@@ -85,7 +83,7 @@ export default function SourcingPage() {
   );
 
   const browseQuery = useSourcedCandidates(browseFilters);
-  const matchQuery = useSourcedMatchForJob(selectedJobId, matchFilters, mode === "match");
+  const matchQuery = useSourcedMatchForJob(resolvedSelectedJobId, matchFilters, mode === "match");
   const explain = useExplainSourcedMatch();
   const shortlist = useShortlistSourcedCandidate();
   const runImport = useRunSourcingImport();
@@ -107,7 +105,7 @@ export default function SourcingPage() {
   }
 
   async function onExplain(candidateId: string) {
-    if (!selectedJobId) {
+    if (!resolvedSelectedJobId) {
       setActionError("Select a job to explain a match.");
       return;
     }
@@ -127,7 +125,7 @@ export default function SourcingPage() {
   }
 
   async function onShortlist(candidateId: string) {
-    if (!selectedJobId) {
+    if (!resolvedSelectedJobId) {
       setActionError("Select a job to shortlist.");
       return;
     }
@@ -153,10 +151,21 @@ export default function SourcingPage() {
           <h1 className="font-heading text-xl font-bold tracking-tight text-foreground mt-1">
             Sourced candidates
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
             {status
               ? status.enabled
-                ? `Provider ${status.provider} · up to ${status.max_per_run} per run · every ${status.interval_minutes}m`
+                ? <>
+                    Provider {status.provider}
+                    {status.provider === "mock" && (
+                      <Badge variant="secondary" className="text-[10px] font-mono text-amber-500 border-amber-500/30">
+                        DEV MODE
+                      </Badge>
+                    )}
+                    <span className="text-muted-foreground/60">·</span>
+                    up to {status.max_per_run} per run
+                    <span className="text-muted-foreground/60">·</span>
+                    every {status.interval_minutes}m
+                  </>
                 : "Sourcing is currently disabled. Existing sourced candidates are still visible below."
               : "Loading…"}
           </p>
@@ -211,7 +220,7 @@ export default function SourcingPage() {
             <Input placeholder="Employment type (full_time)" value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} />
             {jobs.length > 0 && (
               <select
-                value={selectedJobId}
+                value={resolvedSelectedJobId}
                 onChange={(e) => setSelectedJobId(e.target.value)}
                 className="rounded-md border border-border bg-background px-3 py-2 text-sm"
                 aria-label="Active job context"
@@ -228,7 +237,7 @@ export default function SourcingPage() {
 
           <TabsContent value="match" className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
             <select
-              value={selectedJobId}
+              value={resolvedSelectedJobId}
               onChange={(e) => setSelectedJobId(e.target.value)}
               className="rounded-md border border-border bg-background px-3 py-2 text-sm"
               aria-label="Job"
@@ -257,7 +266,7 @@ export default function SourcingPage() {
           isError={browseQuery.isError}
           items={browseQuery.data?.items ?? []}
           total={browseQuery.data?.total ?? 0}
-          selectedJobId={selectedJobId}
+          selectedJobId={resolvedSelectedJobId}
           reasoningById={reasoningById}
           shortlistedKeys={shortlistedKeys}
           onExplain={onExplain}
@@ -271,7 +280,7 @@ export default function SourcingPage() {
           isError={matchQuery.isError}
           items={matchQuery.data?.items ?? []}
           total={matchQuery.data?.total ?? 0}
-          jobId={selectedJobId}
+          jobId={resolvedSelectedJobId}
           reasoningById={reasoningById}
           shortlistedKeys={shortlistedKeys}
           onExplain={onExplain}

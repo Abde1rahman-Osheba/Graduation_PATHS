@@ -15,8 +15,13 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile, status
 
+from app.core.dependencies import (
+    OrgContext,
+    get_current_hiring_org_context,
+    require_active_org_status,
+)
 from app.schemas.screening import (
     ScreeningResultDetail,
     ScreeningResultItem,
@@ -53,14 +58,18 @@ def _parse_uuid(value: str, field: str) -> UUID:
 async def screen_job_from_database(
     job_id: str,
     body: ScreenJobRequest = Body(...),
+    ctx: OrgContext = Depends(require_active_org_status),
 ):
     """
     Discover all relevant candidates in the database for the given job,
     score each one using the LLM + vector scoring pipeline, and produce
     a ranked shortlist.
+
+    Tenant scope is the caller's JWT organization_id — not the request body.
+    Any organization_id in the body is ignored.
     """
     jid = _parse_uuid(job_id, "job_id")
-    org_id = _parse_uuid(body.organization_id, "organization_id")
+    org_id = ctx.organization_id
 
     service = ScreeningService()
     try:
@@ -111,16 +120,19 @@ async def screen_job_from_database(
 )
 async def screen_job_from_csv(
     job_id: str,
-    organization_id: str = Form(...),
     top_k: int = Form(10),
     csv_file: UploadFile = File(...),
+    ctx: OrgContext = Depends(require_active_org_status),
 ):
     """
     Import candidates from the uploaded CSV file, then score and rank
     each one against the specified job.
+
+    Tenant scope is the caller's JWT organization_id — not a form field.
+    Any organization_id in the form is ignored.
     """
     jid = _parse_uuid(job_id, "job_id")
-    org_id = _parse_uuid(organization_id, "organization_id")
+    org_id = ctx.organization_id
 
     raw = await csv_file.read()
     if not raw:
@@ -177,10 +189,15 @@ async def screen_job_from_csv(
     response_model=ScreeningRunResponse,
     summary="Get the status and summary of a screening run.",
 )
-def get_screening_run(run_id: str):
+def get_screening_run(
+    run_id: str,
+    ctx: OrgContext = Depends(require_active_org_status),
+):
     rid = _parse_uuid(run_id, "run_id")
     data = ScreeningService.get_run(rid)
     if data is None:
+        raise HTTPException(status_code=404, detail="screening_run_not_found")
+    if str(ctx.organization_id) != data.get("organization_id"):
         raise HTTPException(status_code=404, detail="screening_run_not_found")
     return ScreeningRunResponse(**data)
 
@@ -193,10 +210,15 @@ def get_screening_run(run_id: str):
     response_model=ScreeningResultsListResponse,
     summary="Get the ranked list of candidates for a screening run.",
 )
-def get_screening_results(run_id: str):
+def get_screening_results(
+    run_id: str,
+    ctx: OrgContext = Depends(require_active_org_status),
+):
     rid = _parse_uuid(run_id, "run_id")
     run_data = ScreeningService.get_run(rid)
     if run_data is None:
+        raise HTTPException(status_code=404, detail="screening_run_not_found")
+    if str(ctx.organization_id) != run_data.get("organization_id"):
         raise HTTPException(status_code=404, detail="screening_run_not_found")
 
     results = ScreeningService.get_results(rid)
@@ -215,9 +237,16 @@ def get_screening_results(run_id: str):
     response_model=ScreeningResultDetail,
     summary="Get the full detail for one candidate in a screening run.",
 )
-def get_screening_result_detail(run_id: str, result_id: str):
-    _parse_uuid(run_id, "run_id")
+def get_screening_result_detail(
+    run_id: str,
+    result_id: str,
+    ctx: OrgContext = Depends(require_active_org_status),
+):
+    rid = _parse_uuid(run_id, "run_id")
     res_id = _parse_uuid(result_id, "result_id")
+    run_data = ScreeningService.get_run(rid)
+    if run_data is None or str(ctx.organization_id) != run_data.get("organization_id"):
+        raise HTTPException(status_code=404, detail="screening_run_not_found")
     detail = ScreeningService.get_result_detail(res_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="screening_result_not_found")

@@ -7,10 +7,9 @@ Implements Phase 7 of the master integration spec:
   POST /admin/sync/candidate/{candidate_id}/retry
   POST /admin/sync/job/{job_id}/retry
 
-The retry endpoints are guarded by the existing authentication system
-when configured (see `_admin_user`). When auth is not yet wired into a
-deployment they remain reachable so that database integration can be
-verified by the project owner during bring-up.
+All endpoints in this module require account_type='platform_admin'.
+This was tightened in the platform-admin / RBAC overhaul — these used
+to be unauthenticated for bring-up.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.dependencies import require_platform_admin
 from app.db.repositories import (
     candidates_graph,
     candidates_relational,
@@ -35,7 +35,13 @@ from app.services.candidate_sync_service import sync_candidate_full
 from app.services.job_sync_service import sync_job_full
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/admin", tags=["Admin"])
+# Apply platform-admin gate at the router level — every route below
+# inherits it. Individual routes can still add extra deps if needed.
+router = APIRouter(
+    prefix="/admin",
+    tags=["Admin"],
+    dependencies=[Depends(require_platform_admin)],
+)
 
 
 def _parse_uuid(value: str, field: str) -> UUID:

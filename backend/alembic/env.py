@@ -73,6 +73,16 @@ from app.db.models.bias_fairness import (  # noqa: F401
     BiasAuditLog,
 )
 from app.db.models.evidence import EvidenceItem, CandidateSource  # noqa: F401
+from app.db.models.assessment import Assessment  # noqa: F401
+from app.db.models.screening import ScreeningRun, ScreeningResult  # noqa: F401
+from app.db.models.contact_enrichment import EnrichedContact  # noqa: F401
+from app.db.models.identity_resolution import CandidateDuplicate, MergeHistory  # noqa: F401
+from app.db.models.outreach_agent import (  # noqa: F401
+    GoogleIntegration,
+    OutreachSession,
+    OutreachAvailabilityWindow,
+    InterviewBooking,
+)
 
 config = context.config
 

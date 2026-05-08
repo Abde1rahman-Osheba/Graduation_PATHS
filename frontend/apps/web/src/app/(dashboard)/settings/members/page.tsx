@@ -46,6 +46,15 @@ export default function MembersPage() {
   const { data: members = [] } = useMembers();
   const { mutateAsync: invite, isPending } = useInviteMember();
   const orgId = useAuthStore((s) => s.user?.orgId ?? "");
+  const orgName = useAuthStore((s) => s.user?.orgName ?? "your organisation");
+  const userRole = useAuthStore((s) => s.user?.role);
+  const userPermissions = useAuthStore((s) => s.user?.permissions ?? []);
+  // Only org_admin (frontend role "admin") can invite members. The backend
+  // also enforces this via require_org_role("org_admin"); the UI gate is
+  // purely cosmetic so non-admins never see a button that would 403.
+  const canInvite =
+    userRole === "admin" ||
+    userPermissions.includes("org.manage_members");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -72,11 +81,13 @@ export default function MembersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-heading text-xl font-bold tracking-tight text-foreground">Team Members</h1>
-          <p className="text-sm text-muted-foreground">{members.length} members in TechCorp Egypt</p>
+          <p className="text-sm text-muted-foreground">{members.length} members in {orgName}</p>
         </div>
-        <Button size="sm" className="gap-1.5 h-9" onClick={() => setDialogOpen(true)}>
-          <UserPlus className="h-3.5 w-3.5" /> Invite Member
-        </Button>
+        {canInvite && (
+          <Button size="sm" className="gap-1.5 h-9" onClick={() => setDialogOpen(true)}>
+            <UserPlus className="h-3.5 w-3.5" /> Invite Member
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -158,7 +169,7 @@ export default function MembersPage() {
             <div className="flex flex-col items-center py-8 text-center gap-3">
               <CheckCircle2 className="h-10 w-10 text-emerald-400" />
               <p className="font-semibold text-foreground">Invite sent!</p>
-              <p className="text-xs text-muted-foreground">They'll receive an email with a join link.</p>
+              <p className="text-xs text-muted-foreground">They&apos;ll receive an email with a join link.</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit(onInvite)} className="space-y-4 py-2">

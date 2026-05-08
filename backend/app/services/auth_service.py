@@ -3,17 +3,41 @@ PATHS Backend — Authentication service.
 
 Orchestrates candidate registration, organisation onboarding, login,
 and the /me context builder.
+
+Platform-admin overhaul (changed in this revision):
+  - Public registration paths CANNOT create platform_admin accounts. Both
+    register_candidate and register_organization hard-code account_type
+    server-side and ignore any body fields that try to override it.
+  - register_organization now creates the organisation in PENDING_APPROVAL
+    state, deactivates the requester's membership, AND opens a row in
+    organization_access_requests. Login is permitted but every org-scoped
+    endpoint refuses access until a platform admin approves the request.
+  - Login and /auth/me return organization.status so the frontend can route
+    pending users to /pending-approval and rejected users to /rejected.
+  - is_platform_admin flag and a permissions[] list are surfaced for the
+    frontend to gate UI without re-deriving role.
 """
+
+from __future__ import annotations
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.rbac import AccountType, OrgRole
 from app.core.security import create_access_token, verify_password
+from app.db.models.organization import (
+    Organization,
+    OrganizationAccessRequest,
+    OrganizationAccessRequestStatus,
+    OrganizationStatus,
+)
+from app.db.repositories.sync_status import write_audit_log
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.organization_repo import OrganizationRepository
 from app.repositories.role_repo import RoleRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.auth import (
+    CandidateProfileSummary,
     CandidateRegisterRequest,
     CandidateRegisterResponse,
     LoginRequest,
@@ -23,8 +47,71 @@ from app.schemas.auth import (
     OrganizationRegisterRequest,
     OrganizationRegisterResponse,
     UserSummary,
-    CandidateProfileSummary,
 )
+
+
+# ── Permissions ──────────────────────────────────────────────────────────
+
+# Permission strings the frontend uses to gate UI. Backend never trusts these
+# from the request — endpoints always check role_code/account_type directly.
+PERMISSIONS_BY_ROLE: dict[str, list[str]] = {
+    OrgRole.ORG_ADMIN.value: [
+        "org.manage_members",
+        "org.manage_settings",
+        "org.create_jobs",
+        "org.view_audit",
+        "org.view_applications",
+        "org.run_screening",
+    ],
+    OrgRole.HIRING_MANAGER.value: [
+        "org.create_jobs",
+        "org.view_applications",
+        "org.run_screening",
+    ],
+    OrgRole.RECRUITER.value: [
+        "org.create_jobs",
+        "org.view_applications",
+        "org.run_screening",
+    ],
+    OrgRole.HR.value: [
+        "org.view_applications",
+        "org.run_screening",
+    ],
+    OrgRole.INTERVIEWER.value: [
+        "org.view_assigned_interviews",
+    ],
+    # Legacy values — preserved for users who still hold them.
+    "hr_manager": [
+        "org.view_applications",
+        "org.run_screening",
+    ],
+    "admin": [
+        "org.manage_members",
+        "org.manage_settings",
+        "org.create_jobs",
+        "org.view_audit",
+        "org.view_applications",
+        "org.run_screening",
+    ],
+}
+
+PLATFORM_ADMIN_PERMISSIONS = [
+    "platform.approve_organizations",
+    "platform.suspend_organizations",
+    "platform.view_all_organizations",
+    "platform.view_all_users",
+    "platform.view_audit",
+]
+
+
+def _permissions_for(user, membership_role_code: str | None) -> list[str]:
+    if user.account_type == AccountType.PLATFORM_ADMIN.value:
+        return list(PLATFORM_ADMIN_PERMISSIONS)
+    if user.account_type == AccountType.CANDIDATE.value:
+        return ["candidate.view_jobs", "candidate.apply_to_jobs", "candidate.edit_profile"]
+    if user.account_type == AccountType.ORGANIZATION_MEMBER.value and membership_role_code:
+        return list(PERMISSIONS_BY_ROLE.get(membership_role_code, []))
+    return []
 
 
 # ── Candidate Registration ────────────────────────────────────────────────
@@ -33,18 +120,19 @@ def register_candidate(db: Session, data: CandidateRegisterRequest) -> Candidate
     user_repo = UserRepository(db)
     cand_repo = CandidateRepository(db)
 
-    # uniqueness check
     if user_repo.get_by_email(data.email):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A user with this email already exists",
         )
 
+    # account_type is hard-coded — schema does not accept it from the body,
+    # but we set it explicitly here as a second layer of defence.
     user = user_repo.create_user(
         email=data.email,
         full_name=data.full_name,
         plain_password=data.password,
-        account_type="candidate",
+        account_type=AccountType.CANDIDATE.value,
     )
 
     profile = cand_repo.create_profile(
@@ -54,6 +142,15 @@ def register_candidate(db: Session, data: CandidateRegisterRequest) -> Candidate
         phone=data.phone,
         location=data.location,
         headline=data.headline,
+    )
+
+    write_audit_log(
+        db,
+        action="auth.register.candidate",
+        entity_type="user",
+        entity_id=user.id,
+        actor_user_id=user.id,
+        new_value={"email": user.email, "account_type": user.account_type},
     )
 
     db.commit()
@@ -95,11 +192,17 @@ def _organization_industry_snapshot(data: OrganizationRegisterRequest) -> str | 
 def register_organization(
     db: Session, data: OrganizationRegisterRequest
 ) -> OrganizationRegisterResponse:
+    """Create a PENDING_APPROVAL organisation + access request.
+
+    The user account is created (so they can log in to /pending-approval),
+    but the org is_active flag is False and status is PENDING_APPROVAL until
+    a platform admin approves the access request. The user's membership is
+    also created with is_active=False.
+    """
     user_repo = UserRepository(db)
     org_repo = OrganizationRepository(db)
     role_repo = RoleRepository(db)
 
-    # uniqueness checks
     if org_repo.get_by_slug(data.organization_slug):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -111,24 +214,58 @@ def register_organization(
             detail="A user with the admin email already exists",
         )
 
+    # Create the org row. The repo defaults is_active=True, but we override
+    # the status flags right after — single transaction, no commit yet.
     org = org_repo.create_organization(
         name=data.organization_name,
         slug=data.organization_slug,
         industry=_organization_industry_snapshot(data),
         contact_email=data.organization_email or str(data.first_admin_email),
     )
+    org.status = OrganizationStatus.PENDING_APPROVAL.value
+    org.is_active = False  # legacy mirror — keeps legacy code paths consistent
 
+    # account_type is hard-coded server-side. The schema does not accept
+    # account_type from the body either, so this is a second layer of
+    # defence against privilege escalation via signup.
     admin_user = user_repo.create_user(
         email=data.first_admin_email,
         full_name=data.first_admin_full_name,
         plain_password=data.first_admin_password,
-        account_type="organization_member",
+        account_type=AccountType.ORGANIZATION_MEMBER.value,
     )
 
-    role_repo.create_membership(
+    membership = role_repo.create_membership(
         user_id=admin_user.id,
         organization_id=org.id,
-        role_code="org_admin",
+        role_code=OrgRole.ORG_ADMIN.value,
+    )
+    # The membership stays inactive until approval. The user can still log in
+    # because the User row itself is is_active=True; they just can't operate
+    # in the org workspace yet.
+    membership.is_active = False
+
+    request = OrganizationAccessRequest(
+        organization_id=org.id,
+        requester_user_id=admin_user.id,
+        status=OrganizationAccessRequestStatus.PENDING.value,
+        contact_role=data.first_admin_job_title,
+        contact_phone=data.first_admin_phone,
+    )
+    db.add(request)
+
+    write_audit_log(
+        db,
+        action="auth.register.organization",
+        entity_type="organization",
+        entity_id=org.id,
+        actor_user_id=admin_user.id,
+        new_value={
+            "name": org.name,
+            "slug": org.slug,
+            "status": org.status,
+            "requester_email": admin_user.email,
+        },
     )
 
     db.commit()
@@ -138,8 +275,39 @@ def register_organization(
     return OrganizationRegisterResponse(
         organization_id=org.id,
         user_id=admin_user.id,
-        role_code="org_admin",
-        message="Organisation registered successfully",
+        role_code=OrgRole.ORG_ADMIN.value,
+        message=(
+            "Your company access request has been submitted. A platform admin "
+            "will review it shortly. You can sign in to view the status."
+        ),
+    )
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+def _is_platform_admin(user) -> bool:
+    return user.account_type == AccountType.PLATFORM_ADMIN.value
+
+
+def _build_org_context(db: Session, user) -> OrganizationContext | None:
+    """Fetch the user's primary membership AND the parent org status.
+
+    Returns None for non-org-member accounts. Returns a context even for
+    pending/rejected/suspended orgs so the frontend can route correctly.
+    """
+    if user.account_type != AccountType.ORGANIZATION_MEMBER.value:
+        return None
+    role_repo = RoleRepository(db)
+    memberships = role_repo.get_user_memberships(user.id, include_inactive=True)
+    if not memberships:
+        return None
+    m = memberships[0]
+    org = m.organization or db.get(Organization, m.organization_id)
+    return OrganizationContext(
+        organization_id=m.organization_id,
+        organization_name=org.name if org else "",
+        role_code=m.role_code,
+        status=(org.status if org else OrganizationStatus.SUSPENDED.value),
     )
 
 
@@ -147,7 +315,6 @@ def register_organization(
 
 def login(db: Session, data: LoginRequest) -> LoginResponse:
     user_repo = UserRepository(db)
-    role_repo = RoleRepository(db)
 
     user = user_repo.get_by_email(data.email)
 
@@ -164,22 +331,28 @@ def login(db: Session, data: LoginRequest) -> LoginResponse:
         )
 
     # Build JWT claims
-    claims: dict = {"sub": user.email, "account_type": user.account_type}
-    org_context: OrganizationContext | None = None
-
-    if user.account_type == "organization_member":
-        memberships = role_repo.get_user_memberships(user.id)
-        if memberships:
-            m = memberships[0]  # primary membership
-            claims["organization_id"] = str(m.organization_id)
-            claims["role_code"] = m.role_code
-            org_context = OrganizationContext(
-                organization_id=m.organization_id,
-                organization_name=m.organization.name,
-                role_code=m.role_code,
-            )
+    claims: dict = {
+        "sub": user.email,
+        "account_type": user.account_type,
+        "is_platform_admin": _is_platform_admin(user),
+    }
+    org_context = _build_org_context(db, user)
+    if org_context is not None:
+        claims["organization_id"] = str(org_context.organization_id)
+        claims["role_code"] = org_context.role_code
+        claims["organization_status"] = org_context.status
 
     token = create_access_token(claims)
+
+    write_audit_log(
+        db,
+        action="auth.login",
+        entity_type="user",
+        entity_id=user.id,
+        actor_user_id=user.id,
+        new_value={"account_type": user.account_type},
+    )
+    db.commit()
 
     return LoginResponse(
         access_token=token,
@@ -189,6 +362,7 @@ def login(db: Session, data: LoginRequest) -> LoginResponse:
             full_name=user.full_name,
             account_type=user.account_type,
             organization=org_context,
+            is_platform_admin=_is_platform_admin(user),
         ),
     )
 
@@ -197,12 +371,10 @@ def login(db: Session, data: LoginRequest) -> LoginResponse:
 
 def get_me_context(db: Session, user) -> MeResponse:
     """Build the full user context for GET /auth/me."""
-    role_repo = RoleRepository(db)
-
     candidate_profile: CandidateProfileSummary | None = None
     org_context: OrganizationContext | None = None
 
-    if user.account_type == "candidate" and user.candidate_profile:
+    if user.account_type == AccountType.CANDIDATE.value and user.candidate_profile:
         p = user.candidate_profile
         candidate_profile = CandidateProfileSummary(
             id=p.id,
@@ -218,15 +390,8 @@ def get_me_context(db: Session, user) -> MeResponse:
             desired_job_categories=list(p.desired_job_categories or []),
         )
 
-    if user.account_type == "organization_member":
-        memberships = role_repo.get_user_memberships(user.id)
-        if memberships:
-            m = memberships[0]
-            org_context = OrganizationContext(
-                organization_id=m.organization_id,
-                organization_name=m.organization.name,
-                role_code=m.role_code,
-            )
+    if user.account_type == AccountType.ORGANIZATION_MEMBER.value:
+        org_context = _build_org_context(db, user)
 
     return MeResponse(
         id=user.id,
@@ -234,6 +399,8 @@ def get_me_context(db: Session, user) -> MeResponse:
         full_name=user.full_name,
         account_type=user.account_type,
         is_active=user.is_active,
+        is_platform_admin=_is_platform_admin(user),
         candidate_profile=candidate_profile,
         organization=org_context,
+        permissions=_permissions_for(user, org_context.role_code if org_context else None),
     )

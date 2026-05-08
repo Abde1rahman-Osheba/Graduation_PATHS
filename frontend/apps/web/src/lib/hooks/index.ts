@@ -34,9 +34,13 @@ import {
   googleIntegrationApi,
   outreachAgentApi,
   publicSchedulingApi,
+  assessmentsApi,
   type BackendOutreachCreateBody,
   interviewRuntimeApi,
   type BackendCreateInterviewSessionBody,
+  contactEnrichmentApi,
+  kbApi,
+  type BackendQdrantCollection,
 } from "@/lib/api";
 
 import type {
@@ -69,6 +73,8 @@ import {
   adaptBackendCandidateProfileOut,
   createEmptyCandidateProfile,
 } from "@/lib/candidate/portal-profile";
+
+import { useAuthStore } from "@/lib/stores/auth.store";
 
 // ── Fallback helper ───────────────────────────────────────────────────────
 
@@ -466,6 +472,25 @@ export const useProposeShortlist = () => {
   });
 };
 
+export const useBiasFlags = (params?: { status?: string; scope?: string; limit?: number }) =>
+  useQuery({
+    queryKey: ["bias-flags", params],
+    queryFn: () => biasFairnessApi.listBiasFlags(params),
+  });
+
+export const useBiasAudit = (params?: { event_type?: string; candidate_id?: string; limit?: number }) =>
+  useQuery({
+    queryKey: ["bias-audit", params],
+    queryFn: () => biasFairnessApi.readBiasAudit(params),
+  });
+
+export const useAnonymizedView = (candidateId: string) =>
+  useQuery({
+    queryKey: ["anonymized-view", candidateId],
+    queryFn: () => biasFairnessApi.getAnonymizedView(candidateId),
+    enabled: Boolean(candidateId),
+  });
+
 // ── Candidate Portal hooks ────────────────────────────────────────────────
 
 export const useCandidateProfile = () =>
@@ -513,6 +538,46 @@ export const useCandidateApplications = () =>
         );
       }, []),
   });
+
+/**
+ * Submit a job application as the current candidate.
+ * Handles 409 (already applied) — the caller should inspect the error status.
+ */
+export const useApplyToJob = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => candidatePortalApi.applyToJob(jobId),
+    onSuccess: (_data, jobId) => {
+      // Invalidate both the global list and the per-job status
+      qc.invalidateQueries({ queryKey: ["candidate-applications"] });
+      qc.invalidateQueries({ queryKey: ["job-application-status", jobId] });
+    },
+  });
+};
+
+/**
+ * Check whether the current authenticated candidate has already applied to
+ * a specific job. Disabled automatically when no jobId / not authenticated.
+ */
+export const useJobApplicationStatus = (
+  jobId: string | null | undefined,
+  options?: { enabled?: boolean },
+) => {
+  const { isAuthenticated, user } = useAuthStore();
+  const isCandidate =
+    user?.accountType === "candidate" || user?.role === "candidate";
+  return useQuery({
+    queryKey: ["job-application-status", jobId],
+    queryFn: () => candidatePortalApi.getApplicationStatus(jobId!),
+    enabled:
+      !!jobId &&
+      isAuthenticated &&
+      isCandidate &&
+      (options?.enabled !== false),
+    staleTime: 60_000,
+    retry: false,
+  });
+};
 
 export const useCVUpload = () => {
   const qc = useQueryClient();
@@ -1342,6 +1407,208 @@ export const useShortlistSourcedCandidate = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["applications"] });
       qc.invalidateQueries({ queryKey: ["shortlist"] });
+    },
+  });
+};
+
+// ── Identity Resolution hooks ─────────────────────────────────────────────
+
+import { identityResolutionApi } from "@/lib/api";
+
+export const useScanDuplicates = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => identityResolutionApi.scan(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["identity-resolution", "duplicates"] });
+    },
+  });
+};
+
+export const useDuplicates = (status?: string) =>
+  useQuery({
+    queryKey: ["identity-resolution", "duplicates", status ?? "all"],
+    queryFn: () => identityResolutionApi.listDuplicates(status),
+    enabled: HAS_BACKEND,
+  });
+
+export const useApproveMerge = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
+      identityResolutionApi.approveMerge(id, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["identity-resolution"] });
+      qc.invalidateQueries({ queryKey: ["merge-history"] });
+    },
+  });
+};
+
+export const useRejectMerge = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
+      identityResolutionApi.rejectMerge(id, notes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["identity-resolution", "duplicates"] });
+    },
+  });
+};
+
+export const useMergeHistory = () =>
+  useQuery({
+    queryKey: ["merge-history"],
+    queryFn: () => identityResolutionApi.getMergeHistory(),
+    enabled: HAS_BACKEND,
+  });
+
+// ── Assessment Agent hooks ──────────────────────────────────────────────────
+
+export const useAssessments = (params?: {
+  application_id?: string;
+  candidate_id?: string;
+  status?: string;
+  limit?: number;
+}) =>
+  useQuery({
+    queryKey: ["assessments", params],
+    queryFn: () => assessmentsApi.list(params),
+    enabled: HAS_BACKEND,
+  });
+
+export const useAssessment = (id: string) =>
+  useQuery({
+    queryKey: ["assessments", id],
+    queryFn: () => assessmentsApi.get(id),
+    enabled: Boolean(id) && HAS_BACKEND,
+  });
+
+export const useCreateAssessment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof assessmentsApi.create>[0]) =>
+      assessmentsApi.create(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["assessments"] });
+    },
+  });
+};
+
+export const useUpdateAssessment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...body
+    }: { id: string } & Parameters<typeof assessmentsApi.update>[1]) =>
+      assessmentsApi.update(id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["assessments"] });
+    },
+  });
+};
+
+export const useDeleteAssessment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => assessmentsApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["assessments"] });
+    },
+  });
+};
+
+// ── Knowledge Base hooks ───────────────────────────────────────────────────
+
+const HAS_KB = Boolean(process.env.NEXT_PUBLIC_API_URL);
+
+async function enrichCollection(
+  name: string,
+): Promise<BackendQdrantCollection> {
+  try {
+    return await kbApi.getCollection(name);
+  } catch {
+    return { name, status: "unknown", vectors_count: null, dimension: null };
+  }
+}
+
+export function useCollections() {
+  return useQuery<BackendQdrantCollection[]>({
+    queryKey: ["kb", "collections"],
+    queryFn: async () => {
+      if (!HAS_KB) return [];
+      const { collections: names } = await kbApi.listCollections();
+      const detailed = await Promise.all(names.map(enrichCollection));
+      return detailed;
+    },
+    staleTime: 30_000,
+  });
+}
+
+export function useSearchCollection() {
+  return useMutation({
+    mutationFn: async ({
+      collectionName,
+      query,
+    }: {
+      collectionName: string;
+      query: string;
+    }) => {
+      throw new Error(
+        "Vector search is not available via the REST API yet. " +
+          "Use the Qdrant client directly or add a search endpoint.",
+      );
+    },
+  });
+}
+
+// ── Contact Enrichment hooks ────────────────────────────────────────────────
+
+export const useContactEnrichmentStatus = () =>
+  useQuery({
+    queryKey: ["contact-enrichment", "status"],
+    queryFn: () => contactEnrichmentApi.status(),
+    enabled: HAS_BACKEND,
+  });
+
+export const useEnrichedContacts = (params?: {
+  status?: string;
+  contact_type?: string;
+}) =>
+  useQuery({
+    queryKey: ["contact-enrichment", "contacts", params],
+    queryFn: () => contactEnrichmentApi.list(params),
+    enabled: HAS_BACKEND,
+  });
+
+export const useApproveContact = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      reviewer_name,
+    }: {
+      id: string;
+      reviewer_name?: string;
+    }) => contactEnrichmentApi.approve(id, { reviewer_name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["contact-enrichment"] });
+    },
+  });
+};
+
+export const useRejectContact = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      reviewer_name,
+    }: {
+      id: string;
+      reviewer_name?: string;
+    }) => contactEnrichmentApi.reject(id, { reviewer_name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["contact-enrichment"] });
     },
   });
 };

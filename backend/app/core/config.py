@@ -269,6 +269,30 @@ class Settings(BaseSettings):
     job_importer_jobs_per_run: int | None = None
 
     @model_validator(mode="after")
+    def _production_guard(self) -> Self:
+        """Enforce production-safe configuration."""
+        if self.app_env == "production":
+            if self.secret_key == "CHANGE-ME-TO-A-RANDOM-SECRET":
+                raise ValueError(
+                    "SECRET_KEY must be changed from the default in production. "
+                    "Generate a strong random secret and set it in your environment."
+                )
+            if self.candidate_sourcing_provider == "mock":
+                raise ValueError(
+                    "candidate_sourcing_provider must not be 'mock' in production. "
+                    "Set a real provider (e.g. 'linkedin') or disable candidate sourcing."
+                )
+            if self.debug is True:
+                object.__setattr__(self, "debug", False)
+        return self
+
+    @computed_field
+    @property
+    def mock_data_enabled(self) -> bool:
+        """Returns True only if mock data is allowed (non-production)."""
+        return self.app_env != "production" and self.candidate_sourcing_provider == "mock"
+
+    @model_validator(mode="after")
     def _apply_linkedin_scheduler_aliases(self) -> Self:
         """Merge LINKEDIN_* / JOB_IMPORTER_* env vars into JOB_SCRAPER_* fields."""
         if self.job_importer_enabled is True:

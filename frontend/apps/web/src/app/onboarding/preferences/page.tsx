@@ -115,7 +115,7 @@ export default function PreferencesPage() {
       <div className="mb-8">
         <p className="text-xs font-semibold uppercase tracking-widest text-primary">Step 8 of 9</p>
         <h1 className="mt-1 font-heading text-3xl font-bold text-foreground">Job Preferences</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Tell us what you're looking for so we can match you to the right roles.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Tell us what you&apos;re looking for so we can match you to the right roles.</p>
       </div>
 
       <div className="space-y-8">
@@ -172,7 +172,7 @@ export default function PreferencesPage() {
             onChange={(e) => setOpenToRelocation(e.target.checked)}
             className="h-4 w-4 rounded border-border accent-primary"
           />
-          <span className="text-sm text-foreground">I'm open to relocation</span>
+          <span className="text-sm text-foreground">I&apos;m open to relocation</span>
         </label>
 
         {/* Salary */}

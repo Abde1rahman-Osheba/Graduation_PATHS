@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.candidate_access import org_can_view_candidate
 from app.core.database import get_db
 from app.core.dependencies import OrgContext, get_current_hiring_org_context
 from app.db.models.candidate import Candidate
@@ -99,6 +100,8 @@ def list_evidence(
       limit     — max rows (default 100, max 500)
     """
     _require_candidate(db, candidate_id)
+    if not org_can_view_candidate(db, ctx.organization_id, candidate_id):
+        raise HTTPException(status_code=404, detail="Candidate not found")
 
     q = select(EvidenceItem).where(EvidenceItem.candidate_id == candidate_id)
     if type_filter:
@@ -137,6 +140,8 @@ def get_evidence_item(
 ):
     """Return a single evidence item."""
     _require_candidate(db, candidate_id)
+    if not org_can_view_candidate(db, ctx.organization_id, candidate_id):
+        raise HTTPException(status_code=404, detail="Candidate not found")
 
     item = db.execute(
         select(EvidenceItem).where(
@@ -176,6 +181,8 @@ def list_sources(
 ):
     """List all source documents/profiles for a candidate."""
     _require_candidate(db, candidate_id)
+    if not org_can_view_candidate(db, ctx.organization_id, candidate_id):
+        raise HTTPException(status_code=404, detail="Candidate not found")
 
     rows = db.execute(
         select(CandidateSource)
@@ -210,6 +217,8 @@ def add_source(
 ):
     """Manually attach an external source to a candidate (e.g. LinkedIn URL)."""
     _require_candidate(db, candidate_id)
+    if not org_can_view_candidate(db, ctx.organization_id, candidate_id):
+        raise HTTPException(status_code=404, detail="Candidate not found")
 
     src = CandidateSource(
         id=uuid.uuid4(),

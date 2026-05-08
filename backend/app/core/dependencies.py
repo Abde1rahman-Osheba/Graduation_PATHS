@@ -2,10 +2,16 @@
 PATHS Backend — FastAPI authentication and authorization dependencies.
 
 Provides reusable Depends-compatible helpers:
-  - get_current_user           — extract + validate JWT
-  - get_current_active_user    — ensure is_active flag
-  - require_account_type(...)  — gate by account type
-  - require_org_role(...)      — gate by organisation role
+  - get_current_user            — extract + validate JWT
+  - get_current_active_user     — ensure is_active flag
+  - require_account_type(...)   — gate by account type
+  - require_platform_admin      — global platform admin gate
+  - require_org_role(...)       — gate by organisation role
+  - get_current_org_context     — JWT-derived org scope (no path param)
+  - require_active_org_status   — also blocks pending/rejected/suspended orgs
+
+The string constants for account types and roles are re-exported here for
+backwards compatibility but the source of truth lives in app.core.rbac.
 """
 
 from dataclasses import dataclass
@@ -19,23 +25,19 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.core.rbac import (
+    AccountType,
+    HIRING_STAFF_ROLE_CODES as _HIRING_STAFF_ROLE_CODES,
+)
 from app.db.models.user import User
 from app.db.models.application import OrganizationMember
+from app.db.models.organization import Organization, OrganizationStatus
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-# Organisation roles allowed to use the full hiring / recruiter API surface
-# (JWT ``role_code`` values). Excludes e.g. ``interviewer`` / generic ``member``.
-HIRING_STAFF_ROLE_CODES: frozenset[str] = frozenset(
-    {
-        "org_admin",
-        "recruiter",
-        "hr",
-        "hr_manager",
-        "hiring_manager",
-        "admin",
-    },
-)
+# Re-export so existing call sites that import HIRING_STAFF_ROLE_CODES from
+# this module keep working.
+HIRING_STAFF_ROLE_CODES = _HIRING_STAFF_ROLE_CODES
 
 
 # ── Core user extraction ──────────────────────────────────────────────────
@@ -197,3 +199,57 @@ def require_organization_member(
             detail="Not a member of this organisation",
         )
     return current_user
+
+
+# ── Platform admin gate ───────────────────────────────────────────────────
+
+def require_platform_admin(
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    """Allow only users with account_type='platform_admin'.
+
+    Used on every /api/v1/admin/* route. Platform admins are seeded via
+    backend/scripts/seed_platform_admins.py and never via public signup.
+    """
+    if current_user.account_type != AccountType.PLATFORM_ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform admin privileges required",
+        )
+    return current_user
+
+
+# ── Approved organisation gate ────────────────────────────────────────────
+
+def require_active_org_status(
+    ctx: "OrgContext" = Depends(get_current_org_context),
+    db: Session = Depends(get_db),
+) -> "OrgContext":
+    """Block users whose organisation is not in the ACTIVE state.
+
+    Used on every endpoint that operates on org-scoped data (jobs, applications,
+    members, etc.). Users in pending/rejected/suspended orgs may still call
+    /auth/me so the frontend can route them to /pending-approval, but every
+    other org endpoint refuses them.
+    """
+    org = db.get(Organization, ctx.organization_id)
+    if org is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organisation not found",
+        )
+    if org.status != OrganizationStatus.ACTIVE.value:
+        # Use 403 with a structured detail — frontend reads this to drive UX.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "organization_not_active",
+                "status": org.status,
+                "message": (
+                    "Your company account is pending approval"
+                    if org.status == OrganizationStatus.PENDING_APPROVAL.value
+                    else f"Your company access is currently {org.status}"
+                ),
+            },
+        )
+    return ctx

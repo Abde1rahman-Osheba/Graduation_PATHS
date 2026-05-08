@@ -47,11 +47,16 @@ export default function CandidateDashboard() {
   const { data: apps = [] } = useCandidateApplications();
   const completion = profileCompletionPct(profile);
 
+  // Profile views and inbound match invites aren't yet exposed by the
+  // backend — show "—" until /candidates/me/stats lands rather than fake
+  // numbers. Active apps + profile completion are derived locally.
+  const interviewInvitesCount = apps.filter((a) => a.status === "interview").length;
+
   const stats = [
-    { label: "Active Applications", value: apps.length,        Icon: Briefcase,  color: "text-primary"      },
-    { label: "Profile Views",       value: 14,                 Icon: Eye,         color: "text-teal-400"     },
-    { label: "Match Invites",       value: 3,                  Icon: Bell,        color: "text-amber-400"    },
-    { label: "Profile Completion",  value: `${completion}%`,   Icon: TrendingUp,  color: "text-emerald-400"  },
+    { label: "Active Applications", value: apps.length,                 Icon: Briefcase,  color: "text-primary"      },
+    { label: "Interview Invites",   value: interviewInvitesCount,       Icon: Bell,        color: "text-amber-500"    },
+    { label: "Profile Views",       value: "—",                          Icon: Eye,         color: "text-teal-500"     },
+    { label: "Profile Completion",  value: `${completion}%`,             Icon: TrendingUp,  color: "text-emerald-500"  },
   ];
 
   return (

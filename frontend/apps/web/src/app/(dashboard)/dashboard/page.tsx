@@ -10,6 +10,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, FunnelChart, Funnel, Cell, BarChart, Bar,
 } from "recharts";
+import type { TooltipContentProps } from "recharts";
 import Link from "next/link";
 import { useDashboardStats, useFunnelData, useWeeklyApplications, useAgentStatus, usePendingApprovals } from "@/lib/hooks";
 import { cn } from "@/lib/utils/cn";
@@ -35,6 +36,8 @@ function StatCard({
       initial="hidden"
       animate="show"
       custom={index}
+      whileHover={{ y: -2 }}
+      transition={{ type: "spring", stiffness: 380, damping: 28 }}
       className="glass rounded-xl p-5 space-y-3"
     >
       <div className="flex items-center justify-between">
@@ -90,12 +93,12 @@ function AgentCard({ agent }: { agent: AgentStatus }) {
   );
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label }: TooltipContentProps) => {
   if (!active || !payload?.length) return null;
   return (
     <div className="glass rounded-lg px-3 py-2 text-xs shadow-lg">
       <p className="font-semibold text-foreground mb-1">{label}</p>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <p key={p.name} style={{ color: p.color }}>{p.name}: {p.value}</p>
       ))}
     </div>
@@ -211,10 +214,10 @@ export default function DashboardPage() {
                   <stop offset="95%" stopColor="#2dd4bf" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.24 0.018 252 / 30%)" />
-              <XAxis dataKey="week" tick={{ fontSize: 11, fill: "oklch(0.55 0.018 252)" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "oklch(0.55 0.018 252)" }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="week" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+              <Tooltip content={(props) => <CustomTooltip {...props} />} />
               <Area type="monotone" dataKey="applications" name="Applications" stroke="#3b82f6" strokeWidth={2} fill="url(#gradBlue)" />
               <Area type="monotone" dataKey="shortlisted" name="Shortlisted" stroke="#2dd4bf" strokeWidth={2} fill="url(#gradTeal)" />
             </AreaChart>
@@ -243,8 +246,8 @@ export default function DashboardPage() {
                     initial={{ width: 0 }}
                     animate={{ width: `${(stage.count / (funnel[0]?.count || 1)) * 100}%` }}
                     transition={{ delay: 0.4 + i * 0.05, duration: 0.6, ease: "easeOut" }}
-                    className="h-full rounded-full"
-                    style={{ background: `oklch(0.62 0.22 264 / ${0.9 - i * 0.1})` }}
+                    className="h-full rounded-full bg-primary"
+                    style={{ opacity: 0.95 - i * 0.1 }}
                   />
                 </div>
               </div>

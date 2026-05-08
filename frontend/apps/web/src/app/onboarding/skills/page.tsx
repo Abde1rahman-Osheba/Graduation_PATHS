@@ -123,7 +123,7 @@ export default function SkillsPage() {
                   onClick={() => addSkill(query.trim())}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-primary hover:bg-primary/10 transition-colors"
                 >
-                  <Plus className="h-3.5 w-3.5" /> Add "{query.trim()}"
+                  <Plus className="h-3.5 w-3.5" /> Add &quot;{query.trim()}&quot;
                 </button>
               )}
             </div>

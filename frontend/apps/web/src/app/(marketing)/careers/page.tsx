@@ -1,14 +1,22 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { Search, MapPin, Briefcase, Users, SlidersHorizontal, X, Clock, ArrowRight } from "lucide-react";
+import {
+  Search, MapPin, Briefcase, Users, SlidersHorizontal, X,
+  Clock, ArrowRight, Loader2, CheckCircle2, AlertCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { usePublicJobs } from "@/lib/hooks";
+import { usePublicJobs, useApplyToJob } from "@/lib/hooks";
+import { useAuthStore } from "@/lib/stores/auth.store";
+import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/utils/cn";
+
+/* ─── Types & constants ────────────────────────────────────────────────── */
 
 const workModeColors = {
   remote: "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
@@ -24,20 +32,147 @@ const levelColors = {
 };
 
 const workModes = ["All", "Remote", "Hybrid", "Onsite"];
-const levels = ["All", "Junior", "Mid", "Senior", "Lead"];
+const levels    = ["All", "Junior", "Mid", "Senior", "Lead"];
+
+/* ─── Apply button — the real fix ──────────────────────────────────────── */
+
+type ApplyState = "idle" | "loading" | "success" | "already_applied" | "wrong_role" | "error";
+
+function ApplyButton({ jobId }: { jobId: string }) {
+  const router  = useRouter();
+  const { isAuthenticated, _hasHydrated, user } = useAuthStore();
+  const { mutateAsync: applyToJob } = useApplyToJob();
+  const [applyState, setApplyState] = useState<ApplyState>("idle");
+  const [errorMsg,   setErrorMsg]   = useState("");
+
+  /* ── Step 1: still hydrating from localStorage ─── */
+  if (!_hasHydrated) {
+    return (
+      <Button size="sm" disabled className="mt-3 gap-1.5 opacity-60">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Apply
+      </Button>
+    );
+  }
+
+  /* ── Step 2: not authenticated — preserve job intent, go to signup ─── */
+  if (!isAuthenticated) {
+    return (
+      <Button size="sm" className="mt-3 gap-1.5 glow-blue" asChild>
+        <Link href={`/candidate-signup?redirectTo=/careers&jobId=${jobId}`}>
+          Apply <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      </Button>
+    );
+  }
+
+  /* ── Step 3: wrong role (recruiter / org member) ─── */
+  const isCandidate =
+    user?.accountType === "candidate" || user?.role === "candidate";
+  if (!isCandidate) {
+    return (
+      <Button size="sm" variant="outline" disabled className="mt-3 gap-1.5 cursor-not-allowed opacity-60">
+        Recruiter account
+      </Button>
+    );
+  }
+
+  /* ── Terminal states ─── */
+  if (applyState === "success") {
+    return (
+      <div className="mt-3 flex items-center gap-1.5 text-[12px] font-semibold text-emerald-500">
+        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> Application sent!
+      </div>
+    );
+  }
+
+  if (applyState === "already_applied") {
+    return (
+      <div className="mt-3 flex items-center gap-1.5 text-[12px] font-semibold text-emerald-500">
+        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> Already applied
+      </div>
+    );
+  }
+
+  if (applyState === "error") {
+    return (
+      <div className="mt-3 space-y-1.5">
+        <div className="flex items-start gap-1.5 text-[11px] text-destructive">
+          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 text-xs"
+          onClick={() => setApplyState("idle")}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  /* ── Step 4: submit application ─── */
+  const handleApply = async () => {
+    setApplyState("loading");
+    setErrorMsg("");
+    try {
+      await applyToJob(jobId);
+      setApplyState("success");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 409) {
+          setApplyState("already_applied");
+          return;
+        }
+        if (err.status === 401 || err.status === 403) {
+          // Session expired or token invalid — send to login preserving intent
+          router.push(`/login?next=/careers`);
+          return;
+        }
+        if (err.status === 404 && err.detail.includes("profile")) {
+          // Profile not set up — redirect to profile completion
+          router.push("/candidate/profile/edit?redirectTo=/careers");
+          return;
+        }
+      }
+      setApplyState("error");
+      setErrorMsg(
+        err instanceof Error ? err.message : "Could not submit application. Please try again.",
+      );
+    }
+  };
+
+  return (
+    <Button
+      size="sm"
+      className="mt-3 gap-1.5 glow-blue"
+      onClick={handleApply}
+      disabled={applyState === "loading"}
+    >
+      {applyState === "loading" ? (
+        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Applying…</>
+      ) : (
+        <>Apply <ArrowRight className="h-3.5 w-3.5" /></>
+      )}
+    </Button>
+  );
+}
+
+/* ─── Page ──────────────────────────────────────────────────────────────── */
 
 export default function JobsPage() {
-  const [query, setQuery] = useState("");
+  const [query,    setQuery]    = useState("");
   const [workMode, setWorkMode] = useState("All");
-  const [level, setLevel] = useState("All");
+  const [level,    setLevel]    = useState("All");
   const { data: jobs = [] } = usePublicJobs();
 
   const filtered = useMemo(() => {
     return jobs.filter((job) => {
-      const q = query.toLowerCase();
-      const matchesQ = !q || job.title.toLowerCase().includes(q) || job.company.toLowerCase().includes(q) || job.skills.some((s) => s.toLowerCase().includes(q));
-      const matchesMode = workMode === "All" || job.workMode === workMode.toLowerCase();
-      const matchesLevel = level === "All" || job.level === level;
+      const q         = query.toLowerCase();
+      const matchesQ  = !q || job.title.toLowerCase().includes(q) || job.company.toLowerCase().includes(q) || job.skills.some((s) => s.toLowerCase().includes(q));
+      const matchesMode  = workMode === "All" || job.workMode === workMode.toLowerCase();
+      const matchesLevel = level   === "All" || job.level    === level;
       return matchesQ && matchesMode && matchesLevel;
     });
   }, [query, workMode, level]);
@@ -47,13 +182,20 @@ export default function JobsPage() {
   return (
     <div className="min-h-screen px-6 py-16">
       <div className="mx-auto max-w-5xl">
+
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-10 text-center">
-          <Badge variant="outline" className="mb-4 border-primary/25 bg-primary/8 text-primary">Open Positions</Badge>
-          <h1 className="font-heading text-4xl font-bold text-foreground">Find your next opportunity</h1>
+          <Badge variant="outline" className="mb-4 border-primary/25 bg-primary/8 text-primary">
+            Open Positions
+          </Badge>
+          <h1 className="font-heading text-4xl font-bold text-foreground">
+            Find your next opportunity
+          </h1>
           <p className="mt-3 text-muted-foreground">
-            {jobs.length} open positions across MENA and globally.
-            <Link href="/candidate-signup" className="ml-1 text-primary hover:underline">Create a profile to apply.</Link>
+            {jobs.length} open positions across MENA and globally.{" "}
+            <Link href="/candidate-signup" className="text-primary hover:underline">
+              Create a profile to apply.
+            </Link>
           </p>
         </motion.div>
 
@@ -68,7 +210,10 @@ export default function JobsPage() {
               className="h-12 pl-10 pr-4 text-sm"
             />
             {query && (
-              <button onClick={() => setQuery("")} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <button
+                onClick={() => setQuery("")}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
                 <X className="h-4 w-4" />
               </button>
             )}
@@ -77,7 +222,9 @@ export default function JobsPage() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-1.5">
               <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Work Mode</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Work Mode
+              </span>
             </div>
             {workModes.map((m) => (
               <button
@@ -87,14 +234,16 @@ export default function JobsPage() {
                   "rounded-full border px-3 py-1 text-xs font-medium transition-all",
                   workMode === m
                     ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+                    : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground",
                 )}
               >
                 {m}
               </button>
             ))}
             <div className="ml-4 flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Level</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Level
+              </span>
             </div>
             {levels.map((l) => (
               <button
@@ -104,14 +253,17 @@ export default function JobsPage() {
                   "rounded-full border px-3 py-1 text-xs font-medium transition-all",
                   level === l
                     ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+                    : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground",
                 )}
               >
                 {l}
               </button>
             ))}
             {hasFilters && (
-              <button onClick={() => { setQuery(""); setWorkMode("All"); setLevel("All"); }} className="ml-auto text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+              <button
+                onClick={() => { setQuery(""); setWorkMode("All"); setLevel("All"); }}
+                className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
                 <X className="h-3 w-3" /> Clear all
               </button>
             )}
@@ -131,36 +283,38 @@ export default function JobsPage() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.04 }}
-              className="glass gradient-border rounded-2xl p-6 hover:ring-1 hover:ring-primary/20 transition-all"
+              className="glass gradient-border rounded-2xl p-6 transition-all hover:ring-1 hover:ring-primary/20"
             >
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
                     <h2 className="font-heading text-[16px] font-bold text-foreground">{job.title}</h2>
-                    <Badge variant="outline" className={cn("text-[10px]", levelColors[job.level as keyof typeof levelColors] ?? "")}>
+                    <Badge
+                      variant="outline"
+                      className={cn("text-[10px]", levelColors[job.level as keyof typeof levelColors] ?? "")}
+                    >
                       {job.level}
                     </Badge>
-                    <Badge variant="outline" className={cn("text-[10px]", workModeColors[job.workMode as keyof typeof workModeColors] ?? "")}>
+                    <Badge
+                      variant="outline"
+                      className={cn("text-[10px]", workModeColors[job.workMode as keyof typeof workModeColors] ?? "")}
+                    >
                       {job.workMode}
                     </Badge>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-4 text-[12px] text-muted-foreground">
                     <span className="flex items-center gap-1.5">
-                      <Briefcase className="h-3 w-3" />
-                      {job.company}
+                      <Briefcase className="h-3 w-3" />{job.company}
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <MapPin className="h-3 w-3" />
-                      {job.location}
+                      <MapPin className="h-3 w-3" />{job.location}
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <Users className="h-3 w-3" />
-                      {job.applicants} applicants
+                      <Users className="h-3 w-3" />{job.applicants} applicants
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <Clock className="h-3 w-3" />
-                      {job.postedAt}
+                      <Clock className="h-3 w-3" />{job.postedAt}
                     </span>
                   </div>
 
@@ -173,9 +327,8 @@ export default function JobsPage() {
 
                 <div className="shrink-0 text-right">
                   <p className="text-[13px] font-semibold text-foreground">{job.salary}</p>
-                  <Button size="sm" className="mt-3 gap-1.5 glow-blue" asChild>
-                    <Link href="/candidate-signup">Apply <ArrowRight className="h-3.5 w-3.5" /></Link>
-                  </Button>
+                  {/* ↓ THE FIX — auth-aware apply button, no longer hardcoded to /candidate-signup */}
+                  <ApplyButton jobId={job.id} />
                 </div>
               </div>
             </motion.div>
@@ -185,21 +338,26 @@ export default function JobsPage() {
             <div className="rounded-2xl border border-dashed border-border/40 p-16 text-center">
               <Search className="mx-auto mb-3 h-10 w-10 text-muted-foreground/30" />
               <p className="text-sm font-medium text-muted-foreground">No jobs match your filters</p>
-              <button onClick={() => { setQuery(""); setWorkMode("All"); setLevel("All"); }} className="mt-3 text-xs text-primary hover:underline">
+              <button
+                onClick={() => { setQuery(""); setWorkMode("All"); setLevel("All"); }}
+                className="mt-3 text-xs text-primary hover:underline"
+              >
                 Clear all filters
               </button>
             </div>
           )}
         </div>
 
-        {/* CTA */}
-        <div className="mt-16 glass gradient-border rounded-2xl p-8 text-center">
-          <h3 className="font-heading text-xl font-bold text-foreground">Don't see the right role?</h3>
+        {/* Bottom CTA */}
+        <div className="glass gradient-border mt-16 rounded-2xl p-8 text-center">
+          <h3 className="font-heading text-xl font-bold text-foreground">Don&apos;t see the right role?</h3>
           <p className="mt-2 text-sm text-muted-foreground">
-            Create a profile and we'll match you automatically when new roles appear.
+            Create a profile and we&apos;ll match you automatically when new roles appear.
           </p>
           <Button className="mt-5 gap-2 glow-blue" asChild>
-            <Link href="/candidate-signup">Create Profile <ArrowRight className="h-4 w-4" /></Link>
+            <Link href="/candidate-signup">
+              Create Profile <ArrowRight className="h-4 w-4" />
+            </Link>
           </Button>
         </div>
       </div>

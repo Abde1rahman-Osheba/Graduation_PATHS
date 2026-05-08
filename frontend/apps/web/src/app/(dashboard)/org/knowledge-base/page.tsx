@@ -1,0 +1,319 @@
+"use client";
+
+import { motion } from "framer-motion";
+import {
+  Database, Loader2, AlertCircle, CheckCircle2, Circle,
+  Layers, BarChart3, Search, BookOpen,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils/cn";
+import { useCollections, useSearchCollection } from "@/lib/hooks";
+import type { BackendQdrantCollection } from "@/lib/api";
+
+function formatNumber(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+const statusConfig: Record<
+  string,
+  { icon: typeof CheckCircle2; color: string; label: string }
+> = {
+  green: { icon: CheckCircle2, color: "text-emerald-400", label: "Active" },
+  yellow: { icon: AlertCircle, color: "text-amber-400", label: "Degraded" },
+  red: { icon: AlertCircle, color: "text-red-400", label: "Error" },
+  grey: { icon: Circle, color: "text-muted-foreground", label: "Unknown" },
+};
+
+function getStatusConfig(status: string | null | undefined) {
+  if (!status) return statusConfig.grey;
+  const s = status.toLowerCase();
+  if (s === "green" || s === "active" || s === "healthy") return statusConfig.green;
+  if (s === "yellow" || s === "degraded") return statusConfig.yellow;
+  if (s === "red" || s === "error" || s === "unhealthy") return statusConfig.red;
+  return statusConfig.grey;
+}
+
+function CollectionCard({
+  collection,
+  index,
+}: {
+  collection: BackendQdrantCollection;
+  index: number;
+}) {
+  const cfg = getStatusConfig(collection.status);
+  const StatusIcon = cfg.icon;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.05 * index }}
+      className="glass rounded-xl p-5 space-y-3"
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <Layers className="h-4 w-4 text-primary" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-heading text-sm font-bold text-foreground truncate">
+              {collection.name}
+            </p>
+            <p className="font-mono text-[10px] text-muted-foreground truncate">
+              {collection.dimension != null
+                ? `${collection.dimension}D`
+                : "Dim unknown"}
+            </p>
+          </div>
+        </div>
+        <Badge
+          variant="outline"
+          className={cn(
+            "gap-1.5 text-[10px] shrink-0",
+            cfg.color,
+          )}
+        >
+          <StatusIcon className="h-3 w-3" />
+          {cfg.label}
+        </Badge>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-lg bg-muted/20 p-2.5 space-y-0.5">
+          <p className="text-xs text-muted-foreground">Vectors</p>
+          <p className="font-heading text-lg font-bold text-foreground">
+            {formatNumber(collection.vectors_count)}
+          </p>
+        </div>
+        <div className="rounded-lg bg-muted/20 p-2.5 space-y-0.5">
+          <p className="text-xs text-muted-foreground">Dimension</p>
+          <p className="font-heading text-lg font-bold text-foreground">
+            {collection.dimension != null
+              ? collection.dimension.toLocaleString()
+              : "—"}
+          </p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+export default function KnowledgeBasePage() {
+  const { data: collections = [], isLoading, isError } = useCollections();
+  const searchMutation = useSearchCollection();
+
+  const totalVectors = collections.reduce(
+    (sum: number, c: BackendQdrantCollection) => sum + (c.vectors_count ?? 0),
+    0,
+  );
+  const connectedCount = collections.filter(
+    (c: BackendQdrantCollection) =>
+      getStatusConfig(c.status).label === "Active",
+  ).length;
+  const isConnected = collections.length === 0 || connectedCount > 0;
+
+  return (
+    <div className="h-full overflow-y-auto p-6 space-y-8 max-w-5xl">
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center gap-3"
+      >
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+          <Database className="h-5 w-5 text-primary" />
+        </div>
+        <div>
+          <h1 className="font-heading text-xl font-bold tracking-tight text-foreground">
+            Knowledge Base
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Vector storage powered by Qdrant — collections, embeddings, and
+            semantic search for the hiring pipeline.
+          </p>
+        </div>
+      </motion.div>
+
+      {/* ── Status summary cards ─────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.03 }}
+          className="glass rounded-xl p-4 space-y-1"
+        >
+          <p className="text-2xl font-bold text-foreground">
+            {collections.length}
+          </p>
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <Layers className="h-3 w-3" /> Total collections
+          </p>
+        </motion.div>
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.06 }}
+          className="glass rounded-xl p-4 space-y-1"
+        >
+          <p className="text-2xl font-bold text-foreground">
+            {formatNumber(totalVectors)}
+          </p>
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <BarChart3 className="h-3 w-3" /> Total vectors
+          </p>
+        </motion.div>
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.09 }}
+          className="glass rounded-xl p-4 space-y-1"
+        >
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "inline-flex h-2.5 w-2.5 rounded-full",
+                isConnected ? "bg-emerald-400" : "bg-red-400",
+              )}
+            />
+            <p className="text-sm font-semibold text-foreground">
+              {isConnected ? "Connected" : "Disconnected"}
+            </p>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Qdrant database status
+          </p>
+        </motion.div>
+      </div>
+
+      {/* ── Loading state ───────────────────────────────────────────── */}
+      {isLoading && (
+        <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading collections…
+        </div>
+      )}
+
+      {/* ── Error state ─────────────────────────────────────────────── */}
+      {isError && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass gradient-border rounded-2xl p-6 text-center space-y-3"
+        >
+          <AlertCircle className="h-8 w-8 text-red-400 mx-auto" />
+          <p className="text-sm font-medium text-foreground">
+            Knowledge Base is not available
+          </p>
+          <p className="text-xs text-muted-foreground max-w-md mx-auto">
+            Verify that Qdrant is running and the backend API is configured.
+          </p>
+        </motion.div>
+      )}
+
+      {/* ── Empty state ─────────────────────────────────────────────── */}
+      {!isLoading && !isError && collections.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass gradient-border rounded-2xl p-8 text-center space-y-3"
+        >
+          <BookOpen className="h-10 w-10 text-muted-foreground mx-auto" />
+          <p className="text-sm font-semibold text-foreground">
+            No vector collections found
+          </p>
+          <p className="text-xs text-muted-foreground max-w-md mx-auto">
+            Knowledge Base is powered by Qdrant. Collections are created
+            automatically when documents are ingested.
+          </p>
+        </motion.div>
+      )}
+
+      {/* ── Collections list ────────────────────────────────────────── */}
+      {!isLoading && !isError && collections.length > 0 && (
+        <div className="space-y-4">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="flex items-center gap-2"
+          >
+            <Layers className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold tracking-wider text-foreground">
+              Collections
+            </h2>
+            <Badge variant="outline" className="ml-auto text-[10px]">
+              {collections.length}
+            </Badge>
+          </motion.div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {collections.map((c, i) => (
+              <CollectionCard key={c.name} collection={c} index={i} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Search / Retrieval test box ──────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className="glass gradient-border rounded-2xl p-6 space-y-4"
+      >
+        <div className="flex items-center gap-2">
+          <Search className="h-4 w-4 text-primary" />
+          <h2 className="text-sm font-semibold tracking-wider text-foreground">
+            Search / Retrieval
+          </h2>
+          <Badge variant="outline" className="text-[10px]">
+            Coming Soon
+          </Badge>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Semantic search across vector collections. Connect via the Qdrant REST
+          API or gRPC interface for programmatic access.
+        </p>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Select disabled>
+            <SelectTrigger className="w-full sm:w-48" size="sm">
+              <SelectValue placeholder="Select collection" />
+            </SelectTrigger>
+            <SelectContent>
+              {collections.map((c) => (
+                <SelectItem key={c.name} value={c.name}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            placeholder="Enter search query…"
+            className="flex-1"
+            disabled
+          />
+          <Button size="sm" disabled>
+            <Search className="h-3.5 w-3.5 mr-1" />
+            Search
+          </Button>
+        </div>
+        {searchMutation.isError && (
+          <div className="flex items-center gap-2 text-xs text-amber-400">
+            <AlertCircle className="h-3 w-3" />
+            {searchMutation.error?.message ?? "Search unavailable"}
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+}
