@@ -7,12 +7,24 @@ import {
   LayoutDashboard, Users, Briefcase, CheckSquare,
   FileText, ChevronLeft, ChevronRight, Zap, Bot,
   Building2, Shield, ShieldCheck, Calendar, Telescope, Sparkles, Search, ClipboardCheck,
-  Database, Upload, Library, GitMerge, Contact,
+  Database, Upload, Library, GitMerge, Contact, CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useUIStore } from "@/lib/stores/ui.store";
 import { usePendingApprovals, useAgentStatus } from "@/lib/hooks";
 
+/**
+ * Company workspace sidebar — 4 groups, organized around work, not agents.
+ *
+ *   Workspace            – the at-a-glance view + the two main entities
+ *   Talent Operations    – the day-to-day hiring workflow
+ *   AI Agents & Intel.   – the AI surfaces (one tile per autonomous agent)
+ *   Organization         – tenant-level config (members, settings, calendar,
+ *                          audit). Org Admin sees more here than Recruiter.
+ *
+ * Per-job Screening lives at /jobs/[id]/screening; users get there via the
+ * Jobs item rather than a top-level Screening link.
+ */
 const navItems = [
   {
     group: "Workspace",
@@ -23,30 +35,36 @@ const navItems = [
     ],
   },
   {
-    group: "Workflow",
+    group: "Talent Operations",
     items: [
-      { label: "Sourcing",       href: "/sourcing",   icon: Sparkles },
-      { label: "Matching",       href: "/org/matching",  icon: Search },
-      { label: "Approvals",      href: "/approvals",  icon: CheckSquare, badge: true },
-      { label: "Interviews",     href: "/interviews", icon: Calendar },
-      { label: "Assessments",    href: "/org/assessments", icon: ClipboardCheck },
-      { label: "Job Ingestion",  href: "/org/job-ingestion", icon: Database },
-      { label: "CV Ingestion",   href: "/org/cv-ingestion", icon: Upload },
-      { label: "Bias & Fairness", href: "/org/bias",    icon: ShieldCheck },
-      { label: "Decision Support", href: "/org/decision-support", icon: FileText },
-      { label: "Identity Resolution", href: "/org/identity-resolution", icon: GitMerge },
-      { label: "Contact Enrichment",  href: "/org/contact-enrichment",  icon: Contact },
-      { label: "Agent Monitoring", href: "/org/agents", icon: Bot },
-      { label: "Knowledge Base", href: "/org/knowledge-base", icon: Library },
-      { label: "Outreach",       href: "/outreach",   icon: Telescope },
-      { label: "Audit Log",      href: "/audit",      icon: Shield },
+      { label: "Sourcing",        href: "/sourcing",          icon: Sparkles },
+      { label: "Matching",        href: "/org/matching",      icon: Search },
+      { label: "Approvals",       href: "/approvals",         icon: CheckSquare, badge: true },
+      { label: "Assessments",     href: "/org/assessments",   icon: ClipboardCheck },
+      { label: "Interviews",      href: "/interviews",        icon: Calendar },
+      { label: "Outreach",        href: "/outreach",          icon: Telescope },
+    ],
+  },
+  {
+    group: "AI Agents & Intelligence",
+    items: [
+      { label: "Agent Monitoring",     href: "/org/agents",                icon: Bot },
+      { label: "CV Ingestion",         href: "/org/cv-ingestion",          icon: Upload },
+      { label: "Job Ingestion",        href: "/org/job-ingestion",         icon: Database },
+      { label: "Bias & Fairness",      href: "/org/bias",                  icon: ShieldCheck },
+      { label: "Decision Support",     href: "/org/decision-support",      icon: FileText },
+      { label: "Knowledge Base",       href: "/org/knowledge-base",        icon: Library },
+      { label: "Identity Resolution",  href: "/org/identity-resolution",   icon: GitMerge },
+      { label: "Contact Enrichment",   href: "/org/contact-enrichment",    icon: Contact },
     ],
   },
   {
     group: "Organization",
     items: [
-      { label: "Organization",   href: "/settings/organization", icon: Building2 },
       { label: "Members",        href: "/settings/members",      icon: Users },
+      { label: "Organization",   href: "/settings/organization", icon: Building2 },
+      { label: "Calendar",       href: "/settings/calendar",     icon: CalendarClock },
+      { label: "Audit Log",      href: "/audit",                 icon: Shield },
     ],
   },
 ];

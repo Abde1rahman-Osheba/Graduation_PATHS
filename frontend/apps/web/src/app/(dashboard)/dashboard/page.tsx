@@ -1,10 +1,13 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   Briefcase, Users, CheckSquare, Clock,
   TrendingUp, Calendar, UserCheck, ChevronRight,
   Bot, Loader2, CheckCircle2, Circle, AlertCircle, Activity,
+  AlertTriangle, CalendarClock,
+  ListChecks, Zap, ArrowRight,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -12,7 +15,11 @@ import {
 } from "recharts";
 import type { TooltipContentProps } from "recharts";
 import Link from "next/link";
-import { useDashboardStats, useFunnelData, useWeeklyApplications, useAgentStatus, usePendingApprovals } from "@/lib/hooks";
+import {
+  useDashboardStats, useFunnelData, useWeeklyApplications, useAgentStatus,
+  usePendingApprovals, useJobs, useMembers, useOrganization, useBiasFlags,
+} from "@/lib/hooks";
+import { googleIntegrationApi } from "@/lib/api";
 import { cn } from "@/lib/utils/cn";
 import { relativeTime, stageLabel } from "@/lib/utils/format";
 import type { AgentStatus } from "@/types";
@@ -105,12 +112,357 @@ const CustomTooltip = ({ active, payload, label }: TooltipContentProps) => {
   );
 };
 
+// ── Setup Checklist + Priority Actions ────────────────────────────────────
+//
+// These two sections answer "what should the company do now?" — they are
+// derived from honest API state rather than hardcoded. A checklist item is
+// marked complete only when its underlying signal returns truthy data; a
+// priority action only appears if its signal indicates something that needs
+// attention. There is no fake completion or fake counts.
+
+interface ChecklistItem {
+  key: string;
+  label: string;
+  hint: string;
+  href: string;
+  done: boolean;
+  // If the signal is unknown (e.g. backend down), treat as not done but
+  // visually distinct from confirmed-incomplete.
+  unknown?: boolean;
+}
+
+function SetupChecklist({
+  items,
+  loading,
+}: {
+  items: ChecklistItem[];
+  loading: boolean;
+}) {
+  const doneCount = items.filter((i) => i.done).length;
+  const totalCount = items.length;
+  const pct = totalCount === 0 ? 0 : Math.round((doneCount / totalCount) * 100);
+  const allDone = doneCount === totalCount && totalCount > 0;
+
+  if (allDone) return null; // hide once setup is complete
+  if (loading) {
+    return (
+      <div className="glass rounded-xl p-5 flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking workspace setup…
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="glass rounded-xl p-5 space-y-4"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ListChecks className="h-4 w-4 text-primary" />
+          <h2 className="font-heading text-[15px] font-semibold text-foreground">
+            Workspace setup
+          </h2>
+        </div>
+        <span className="text-xs font-mono text-muted-foreground">
+          {doneCount} / {totalCount} complete · {pct}%
+        </span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-muted/40 overflow-hidden">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="h-full rounded-full bg-primary"
+        />
+      </div>
+      <ul className="space-y-1.5">
+        {items.map((it) => (
+          <li key={it.key}>
+            <Link
+              href={it.href}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",
+                it.done
+                  ? "opacity-50 hover:opacity-70"
+                  : "hover:bg-muted/30",
+              )}
+            >
+              {it.done ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+              ) : it.unknown ? (
+                <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
+              ) : (
+                <Circle className="h-4 w-4 shrink-0 text-muted-foreground/50" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p
+                  className={cn(
+                    "text-[13px] font-medium",
+                    it.done ? "text-muted-foreground line-through" : "text-foreground",
+                  )}
+                >
+                  {it.label}
+                </p>
+                {!it.done && (
+                  <p className="text-[11px] text-muted-foreground">{it.hint}</p>
+                )}
+              </div>
+              {!it.done && (
+                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+              )}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </motion.div>
+  );
+}
+
+interface PriorityAction {
+  key: string;
+  label: string;
+  detail: string;
+  href: string;
+  count: number;
+  severity: "critical" | "warn" | "info";
+  icon: React.ElementType;
+}
+
+function PriorityActions({ actions }: { actions: PriorityAction[] }) {
+  if (actions.length === 0) return null;
+  const sevColor = {
+    critical: "border-red-500/30 bg-red-500/5",
+    warn: "border-amber-500/30 bg-amber-500/5",
+    info: "border-primary/20 bg-primary/5",
+  };
+  const dotColor = {
+    critical: "bg-red-400",
+    warn: "bg-amber-400",
+    info: "bg-primary",
+  };
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.05 }}
+      className="glass rounded-xl p-5 space-y-3"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Zap className="h-4 w-4 text-primary" />
+          <h2 className="font-heading text-[15px] font-semibold text-foreground">
+            Priority actions
+          </h2>
+        </div>
+        <span className="text-[11px] text-muted-foreground">
+          {actions.length} item{actions.length > 1 ? "s" : ""} need attention
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        {actions.map((a) => {
+          const Icon = a.icon;
+          return (
+            <Link
+              key={a.key}
+              href={a.href}
+              className={cn(
+                "group flex items-start gap-3 rounded-lg border px-3.5 py-3 transition-all hover:translate-x-0.5",
+                sevColor[a.severity],
+              )}
+            >
+              <span
+                className={cn(
+                  "mt-1 h-1.5 w-1.5 shrink-0 rounded-full",
+                  dotColor[a.severity],
+                )}
+              />
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold text-foreground">
+                  {a.label}
+                </p>
+                <p className="text-[11px] text-muted-foreground">{a.detail}</p>
+              </div>
+              {a.count > 0 && (
+                <span className="ml-1 rounded-full bg-foreground/10 px-2 py-0.5 text-[11px] font-mono font-semibold text-foreground">
+                  {a.count}
+                </span>
+              )}
+              <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground" />
+            </Link>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+}
+
 export default function DashboardPage() {
   const { data: stats } = useDashboardStats();
   const { data: funnel = [] } = useFunnelData();
   const { data: weekly = [] } = useWeeklyApplications();
   const { data: agents = [] } = useAgentStatus();
   const { data: pending = [] } = usePendingApprovals();
+
+  // Setup-checklist signals — every value is read from a real hook with no
+  // mock fallback. If the backend is unreachable, we surface "unknown".
+  const { data: org, isLoading: orgLoading } = useOrganization();
+  const { data: members = [], isLoading: membersLoading } = useMembers();
+  const { data: jobs = [], isLoading: jobsLoading } = useJobs();
+  const { data: biasFlags = [] } = useBiasFlags({ status: "open" });
+  const calendarStatus = useQuery({
+    queryKey: ["google-integration", "status"],
+    queryFn: googleIntegrationApi.status,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const calendarConnected =
+    !!calendarStatus.data?.connected && !!calendarStatus.data?.configured;
+  const calendarUnknown = calendarStatus.isError || calendarStatus.isLoading;
+
+  const setupLoading =
+    orgLoading || membersLoading || jobsLoading || calendarStatus.isLoading;
+
+  const checklist: ChecklistItem[] = [
+    {
+      key: "org-profile",
+      label: "Complete the organization profile",
+      hint: "Add industry, website, and headcount.",
+      href: "/settings/organization",
+      done: Boolean(org && org.name && org.industry && org.website),
+    },
+    {
+      key: "team",
+      label: "Invite at least one teammate",
+      hint: "Add another recruiter, hiring manager, or interviewer.",
+      href: "/settings/members",
+      done: members.length > 1,
+    },
+    {
+      key: "calendar",
+      label: "Connect Google Calendar",
+      hint: "Required for automated interview scheduling.",
+      href: "/settings/calendar",
+      done: calendarConnected,
+      unknown: calendarUnknown,
+    },
+    {
+      key: "kb",
+      label: "Set up the Knowledge Base",
+      hint: "Index company docs to power Q&A and decision support.",
+      href: "/org/knowledge-base",
+      done: false, // surfaced once a KB count endpoint is wired up
+      unknown: true,
+    },
+    {
+      key: "first-job",
+      label: "Create your first job",
+      hint: "Open a role to start screening candidates.",
+      href: "/jobs",
+      done: jobs.length > 0,
+    },
+    {
+      key: "first-candidate",
+      label: "Add or import your first candidate",
+      hint: "Upload a CV or invite a candidate to apply.",
+      href: "/candidates",
+      done: (stats?.totalCandidates ?? 0) > 0,
+    },
+  ];
+
+  // Priority actions — only emitted if the underlying signal warrants it.
+  const actions: PriorityAction[] = [];
+  if (calendarUnknown && !calendarStatus.isLoading) {
+    actions.push({
+      key: "calendar-backend",
+      label: "Calendar backend unreachable",
+      detail: "Interviews cannot auto-create calendar events.",
+      href: "/settings/calendar",
+      count: 0,
+      severity: "warn",
+      icon: CalendarClock,
+    });
+  } else if (!calendarConnected && !calendarStatus.isLoading) {
+    actions.push({
+      key: "calendar-connect",
+      label: "Connect Google Calendar",
+      detail: "Required for automated interview scheduling.",
+      href: "/settings/calendar",
+      count: 0,
+      severity: "warn",
+      icon: CalendarClock,
+    });
+  }
+  if (jobs.length === 0 && !jobsLoading) {
+    actions.push({
+      key: "no-jobs",
+      label: "No jobs created yet",
+      detail: "Create your first job to start the hiring pipeline.",
+      href: "/jobs",
+      count: 0,
+      severity: "info",
+      icon: Briefcase,
+    });
+  }
+  if (members.length <= 1 && !membersLoading) {
+    actions.push({
+      key: "no-team",
+      label: "Workspace has only one member",
+      detail: "Invite recruiters, hiring managers, or interviewers.",
+      href: "/settings/members",
+      count: 0,
+      severity: "info",
+      icon: Users,
+    });
+  }
+  if (pending.length > 0) {
+    actions.push({
+      key: "pending-approvals",
+      label: "Pending approvals waiting for you",
+      detail: "Shortlists or actions need a HITL decision.",
+      href: "/approvals",
+      count: pending.length,
+      severity: pending.length > 5 ? "critical" : "warn",
+      icon: CheckSquare,
+    });
+  }
+  if ((stats?.pendingApprovals ?? 0) > 0 && pending.length === 0) {
+    // Backend reports queue but the list endpoint is empty/limited — surface it.
+    actions.push({
+      key: "approvals-queue",
+      label: "HITL queue has open items",
+      detail: "Open the approvals queue for details.",
+      href: "/approvals",
+      count: stats?.pendingApprovals ?? 0,
+      severity: "warn",
+      icon: CheckSquare,
+    });
+  }
+  if (biasFlags.length > 0) {
+    actions.push({
+      key: "bias-flags",
+      label: "Open bias / fairness flags",
+      detail: "Review anonymization and de-anonymization events.",
+      href: "/org/bias",
+      count: biasFlags.length,
+      severity: "warn",
+      icon: AlertTriangle,
+    });
+  }
+  const failedAgents = agents.filter((a) => a.status === "failed").length;
+  if (failedAgents > 0) {
+    actions.push({
+      key: "failed-agents",
+      label: "Agent runs failed",
+      detail: "One or more agents reported a failure.",
+      href: "/org/agents",
+      count: failedAgents,
+      severity: "critical",
+      icon: Bot,
+    });
+  }
 
   return (
     <div className="p-6 space-y-6 max-w-[1400px]">
@@ -122,7 +474,11 @@ export default function DashboardPage() {
       >
         <div>
           <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Good morning, Ahmed — here&apos;s your hiring pulse.</p>
+          <p className="text-sm text-muted-foreground">
+            {org?.name
+              ? `${org.name} — your hiring pulse.`
+              : "Your hiring pulse."}
+          </p>
         </div>
         {pending.length > 0 && (
           <Link
@@ -135,6 +491,12 @@ export default function DashboardPage() {
           </Link>
         )}
       </motion.div>
+
+      {/* Setup checklist (auto-hides when complete) */}
+      <SetupChecklist items={checklist} loading={setupLoading} />
+
+      {/* Priority actions (auto-hides when none) */}
+      <PriorityActions actions={actions} />
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

@@ -93,10 +93,15 @@ export default function CandidateLayout({ children }: { children: React.ReactNod
           })}
         </nav>
 
-        {/* Footer */}
+        {/* Footer
+            Removed the prior /candidate/settings link — that route does not
+            exist and would 404. Profile editing lives at /candidate/profile/edit
+            which is reachable from the My Profile page. If a generic candidate
+            settings surface is needed later (notifications, language, privacy),
+            add it as a real page first, then re-introduce a sidebar entry. */}
         <div className="border-t border-border/40 p-4 space-y-1">
-          <Link href="/candidate/settings" className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-all">
-            <Settings className="h-4 w-4" /> Settings
+          <Link href="/candidate/profile/edit" className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-all">
+            <Settings className="h-4 w-4" /> Edit Profile
           </Link>
           <Link href="/login" className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-all">
             <LogOut className="h-4 w-4" /> Sign Out
