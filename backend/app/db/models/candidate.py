@@ -33,6 +33,23 @@ class Candidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
 
+    # Source provenance — added in m130013. See app/core/candidate_sources.py
+    # for the canonical taxonomy. Defaults to "paths_profile" because every
+    # pre-existing candidate row had user_id IS NOT NULL (i.e. came from a
+    # PATHS account). The migration backfills accordingly.
+    source_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="paths_profile",
+    )
+    source_platform: Mapped[str | None] = mapped_column(
+        String(64), nullable=True,
+    )
+    # If non-NULL, the candidate is owned by a specific organization
+    # (uploaded/sourced/job-fair). If NULL, the candidate is a public PATHS
+    # profile visible to any organization that enables PATHS_PROFILE source.
+    owner_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True,
+    )
+
     # Relationships
     user = relationship("User", back_populates="candidate_profile", lazy="selectin")
     applications = relationship("Application", back_populates="candidate", lazy="selectin")

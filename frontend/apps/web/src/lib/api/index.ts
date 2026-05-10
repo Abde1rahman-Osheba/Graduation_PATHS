@@ -14,6 +14,9 @@ export interface BackendJob {
   status: string;
   source_type: string | null;
   source_platform?: string | null;
+  application_mode: string;
+  external_apply_url: string | null;
+  visibility: string;
   employment_type: string | null;
   seniority_level: string | null;
   workplace_type: string | null;
@@ -1675,5 +1678,169 @@ export const contactEnrichmentApi = {
     api.post<BackendEnrichedContactOut>(
       `/api/v1/contact-enrichment/contacts/${id}/reject`,
       body ?? {},
+    ),
+};
+
+
+// ── Candidate Sourcing & Pool ─────────────────────────────────────────────
+//
+// Backend: app/api/v1/candidate_sourcing.py — every endpoint is gated behind
+// require_active_org_status, so org isolation is enforced server-side. The
+// UI never sends organization_id — it is read from the JWT.
+
+export type SourceTypeKey =
+  | "paths_profile"
+  | "sourced"
+  | "company_uploaded"
+  | "job_fair"
+  | "ats_import"
+  | "manual_add";
+
+export interface SourceCatalogEntry {
+  source_type: SourceTypeKey;
+  label: string;
+  description: string;
+}
+export interface SourceCatalogResponse {
+  sources: SourceCatalogEntry[];
+}
+
+export interface OrgSourceSettings {
+  organization_id: string;
+  use_paths_profiles_default: boolean;
+  use_sourced_candidates_default: boolean;
+  use_uploaded_candidates_default: boolean;
+  use_job_fair_candidates_default: boolean;
+  use_ats_candidates_default: boolean;
+  default_top_k: number;
+  default_min_profile_completeness: number;
+  default_min_evidence_confidence: number;
+  updated_at: string | null;
+  updated_by_user_id: string | null;
+}
+
+export interface OrgSourceSettingsUpdate {
+  use_paths_profiles_default?: boolean;
+  use_sourced_candidates_default?: boolean;
+  use_uploaded_candidates_default?: boolean;
+  use_job_fair_candidates_default?: boolean;
+  use_ats_candidates_default?: boolean;
+  default_top_k?: number;
+  default_min_profile_completeness?: number;
+  default_min_evidence_confidence?: number;
+}
+
+export interface SourceCountEntry {
+  source_type: SourceTypeKey;
+  label: string;
+  count: number;
+}
+export interface SourceCountsResponse {
+  organization_id: string;
+  counts: SourceCountEntry[];
+  total: number;
+}
+
+export interface JobPoolConfig {
+  job_id: string;
+  organization_id: string;
+  use_paths_profiles: boolean;
+  use_sourced_candidates: boolean;
+  use_uploaded_candidates: boolean;
+  use_job_fair_candidates: boolean;
+  use_ats_candidates: boolean;
+  top_k: number;
+  min_profile_completeness: number;
+  min_evidence_confidence: number;
+  filters_json: Record<string, unknown> | null;
+  updated_at: string | null;
+}
+
+export interface JobPoolConfigUpdate {
+  use_paths_profiles?: boolean;
+  use_sourced_candidates?: boolean;
+  use_uploaded_candidates?: boolean;
+  use_job_fair_candidates?: boolean;
+  use_ats_candidates?: boolean;
+  top_k?: number;
+  min_profile_completeness?: number;
+  min_evidence_confidence?: number;
+  filters_json?: Record<string, unknown> | null;
+}
+
+export interface PoolPreview {
+  job_id: string;
+  organization_id: string;
+  config_snapshot: Record<string, unknown>;
+  source_breakdown: Partial<Record<SourceTypeKey, number>>;
+  total_candidates_found: number;
+  duplicates_removed: number;
+  excluded_incomplete_profile: number;
+  excluded_low_evidence: number;
+  eligible_candidates: number;
+}
+
+export interface PoolBuildResult {
+  pool_run_id: string;
+  job_id: string;
+  organization_id: string;
+  eligible_candidates: number;
+  excluded_candidates: number;
+  duplicates_removed: number;
+  source_breakdown: Partial<Record<SourceTypeKey, number>>;
+  status: string;
+}
+
+export interface PoolRunSummary {
+  pool_run_id: string;
+  job_id: string;
+  eligible_candidates: number;
+  excluded_candidates: number;
+  duplicates_removed: number;
+  source_breakdown: Partial<Record<SourceTypeKey, number>> | null;
+  status: string;
+  created_at: string | null;
+  completed_at: string | null;
+}
+export interface PoolRunListResponse {
+  runs: PoolRunSummary[];
+}
+
+export const candidateSourcingApi = {
+  catalog: () =>
+    api.get<SourceCatalogResponse>("/api/v1/candidate-source-catalog"),
+  getSettings: () =>
+    api.get<OrgSourceSettings>("/api/v1/organization/candidate-source-settings"),
+  updateSettings: (body: OrgSourceSettingsUpdate) =>
+    api.put<OrgSourceSettings>(
+      "/api/v1/organization/candidate-source-settings",
+      body,
+    ),
+  counts: () =>
+    api.get<SourceCountsResponse>(
+      "/api/v1/organization/candidate-source-counts",
+    ),
+  getJobPoolConfig: (jobId: string) =>
+    api.get<JobPoolConfig>(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/candidate-pool/config`,
+    ),
+  updateJobPoolConfig: (jobId: string, body: JobPoolConfigUpdate) =>
+    api.put<JobPoolConfig>(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/candidate-pool/config`,
+      body,
+    ),
+  previewJobPool: (jobId: string) =>
+    api.post<PoolPreview>(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/candidate-pool/preview`,
+      {},
+    ),
+  buildJobPool: (jobId: string) =>
+    api.post<PoolBuildResult>(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/candidate-pool/build`,
+      {},
+    ),
+  listPoolRuns: (jobId: string) =>
+    api.get<PoolRunListResponse>(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/candidate-pool/runs`,
     ),
 };

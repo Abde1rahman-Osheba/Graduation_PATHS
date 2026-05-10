@@ -7,55 +7,65 @@ import {
   LayoutDashboard, Users, Briefcase, CheckSquare,
   FileText, ChevronLeft, ChevronRight, Zap, Bot,
   Building2, Shield, ShieldCheck, Calendar, Telescope, Sparkles, Search, ClipboardCheck,
-  Database, Upload, Library, GitMerge, Contact, CalendarClock,
+  Database, Upload, Library, GitMerge, Contact, CalendarClock, Globe2,
 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useUIStore } from "@/lib/stores/ui.store";
 import { usePendingApprovals, useAgentStatus } from "@/lib/hooks";
 
 /**
- * Company workspace sidebar — 4 groups, organized around work, not agents.
+ * Company workspace sidebar — 4 groups, organized around the hiring
+ * workflow rather than around individual agents.
  *
- *   Workspace            – the at-a-glance view + the two main entities
- *   Talent Operations    – the day-to-day hiring workflow
- *   AI Agents & Intel.   – the AI surfaces (one tile per autonomous agent)
- *   Organization         – tenant-level config (members, settings, calendar,
- *                          audit). Org Admin sees more here than Recruiter.
+ *   Workspace        – Dashboard, Jobs, Candidates, Candidate Sources.
+ *                      Candidate Sources is the single place to control
+ *                      where candidates in the company's jobs come from
+ *                      (PATHS profiles / sourced / uploaded / job-fair / ATS).
+ *   Hiring Workflow  – the day-to-day pipeline: Matching → Approvals →
+ *                      Assessments → Interviews → Outreach. Sourcing is
+ *                      grouped here as the inbound side of the workflow.
+ *   AI Operations    – AI surfaces with company-friendly labels (e.g.
+ *                      "CV Processing" instead of "CV Ingestion",
+ *                      "Fairness & Compliance" instead of "Bias & Fairness").
+ *                      Routes are unchanged so deep links keep working.
+ *   Organization     – tenant-level config (members, settings, calendar,
+ *                      audit). Org Admin sees more here than Recruiter.
  *
- * Per-job Screening lives at /jobs/[id]/screening; users get there via the
- * Jobs item rather than a top-level Screening link.
+ * Per-job Screening lives at /jobs/[id]/screening; users get there through
+ * Jobs rather than a top-level Screening item.
  */
 const navItems = [
   {
     group: "Workspace",
     items: [
-      { label: "Dashboard",      href: "/dashboard",  icon: LayoutDashboard },
-      { label: "Candidates",     href: "/candidates", icon: Users },
-      { label: "Jobs",           href: "/jobs",        icon: Briefcase },
+      { label: "Dashboard",         href: "/dashboard",         icon: LayoutDashboard },
+      { label: "Jobs",              href: "/jobs",              icon: Briefcase },
+      { label: "Candidates",        href: "/candidates",        icon: Users },
+      { label: "Candidate Sources", href: "/candidate-sources", icon: Globe2 },
     ],
   },
   {
-    group: "Talent Operations",
+    group: "Hiring Workflow",
     items: [
-      { label: "Sourcing",        href: "/sourcing",          icon: Sparkles },
       { label: "Matching",        href: "/org/matching",      icon: Search },
       { label: "Approvals",       href: "/approvals",         icon: CheckSquare, badge: true },
       { label: "Assessments",     href: "/org/assessments",   icon: ClipboardCheck },
       { label: "Interviews",      href: "/interviews",        icon: Calendar },
       { label: "Outreach",        href: "/outreach",          icon: Telescope },
+      { label: "Sourcing",        href: "/sourcing",          icon: Sparkles },
     ],
   },
   {
-    group: "AI Agents & Intelligence",
+    group: "AI Operations",
     items: [
-      { label: "Agent Monitoring",     href: "/org/agents",                icon: Bot },
-      { label: "CV Ingestion",         href: "/org/cv-ingestion",          icon: Upload },
-      { label: "Job Ingestion",        href: "/org/job-ingestion",         icon: Database },
-      { label: "Bias & Fairness",      href: "/org/bias",                  icon: ShieldCheck },
-      { label: "Decision Support",     href: "/org/decision-support",      icon: FileText },
-      { label: "Knowledge Base",       href: "/org/knowledge-base",        icon: Library },
-      { label: "Identity Resolution",  href: "/org/identity-resolution",   icon: GitMerge },
-      { label: "Contact Enrichment",   href: "/org/contact-enrichment",    icon: Contact },
+      { label: "AI System Status",         href: "/org/agents",              icon: Bot },
+      { label: "CV Processing",            href: "/org/cv-ingestion",        icon: Upload },
+      { label: "Job Description Analysis", href: "/org/job-ingestion",       icon: Database },
+      { label: "Hiring Decision Support",  href: "/org/decision-support",    icon: FileText },
+      { label: "Company Knowledge Base",   href: "/org/knowledge-base",      icon: Library },
+      { label: "Fairness & Compliance",    href: "/org/bias",                icon: ShieldCheck },
+      { label: "Duplicate Candidates",     href: "/org/identity-resolution", icon: GitMerge },
+      { label: "Contact Finder",           href: "/org/contact-enrichment",  icon: Contact },
     ],
   },
   {

@@ -56,6 +56,10 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
             pass
 
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as test_client:
+    # TrustedHostMiddleware (mounted in app.main) only permits "localhost",
+    # "127.0.0.1", and settings.app_host. TestClient's default base_url uses
+    # host "testclient" which would be rejected with 400 "Invalid host
+    # header" before any auth or RBAC dependency runs — so we override.
+    with TestClient(app, base_url="http://localhost") as test_client:
         yield test_client
     app.dependency_overrides.clear()

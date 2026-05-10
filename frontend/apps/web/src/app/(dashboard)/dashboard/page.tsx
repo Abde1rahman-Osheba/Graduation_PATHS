@@ -18,8 +18,10 @@ import Link from "next/link";
 import {
   useDashboardStats, useFunnelData, useWeeklyApplications, useAgentStatus,
   usePendingApprovals, useJobs, useMembers, useOrganization, useBiasFlags,
+  useSourceCounts, useOrgSourceSettings,
 } from "@/lib/hooks";
 import { googleIntegrationApi } from "@/lib/api";
+import type { SourceTypeKey } from "@/lib/api";
 import { cn } from "@/lib/utils/cn";
 import { relativeTime, stageLabel } from "@/lib/utils/format";
 import type { AgentStatus } from "@/types";
@@ -312,6 +314,9 @@ export default function DashboardPage() {
   const { data: members = [], isLoading: membersLoading } = useMembers();
   const { data: jobs = [], isLoading: jobsLoading } = useJobs();
   const { data: biasFlags = [] } = useBiasFlags({ status: "open" });
+  const { data: sourceCounts } = useSourceCounts();
+  const { data: sourceSettings, isLoading: sourceSettingsLoading } =
+    useOrgSourceSettings();
   const calendarStatus = useQuery({
     queryKey: ["google-integration", "status"],
     queryFn: googleIntegrationApi.status,
@@ -323,7 +328,23 @@ export default function DashboardPage() {
   const calendarUnknown = calendarStatus.isError || calendarStatus.isLoading;
 
   const setupLoading =
-    orgLoading || membersLoading || jobsLoading || calendarStatus.isLoading;
+    orgLoading ||
+    membersLoading ||
+    jobsLoading ||
+    calendarStatus.isLoading ||
+    sourceSettingsLoading;
+
+  // "Sources configured" means at least one source toggle is ON. Default
+  // settings created by the backend already have three toggles ON, so this
+  // ticks ✓ on first load. We treat all-OFF as a deliberate misconfiguration
+  // worth flagging.
+  const sourcesConfigured =
+    !!sourceSettings &&
+    (sourceSettings.use_paths_profiles_default ||
+      sourceSettings.use_sourced_candidates_default ||
+      sourceSettings.use_uploaded_candidates_default ||
+      sourceSettings.use_job_fair_candidates_default ||
+      sourceSettings.use_ats_candidates_default);
 
   const checklist: ChecklistItem[] = [
     {
@@ -347,6 +368,13 @@ export default function DashboardPage() {
       href: "/settings/calendar",
       done: calendarConnected,
       unknown: calendarUnknown,
+    },
+    {
+      key: "sources",
+      label: "Configure candidate sources",
+      hint: "Choose which candidate sources participate in your jobs.",
+      href: "/candidate-sources",
+      done: sourcesConfigured,
     },
     {
       key: "kb",
@@ -415,6 +443,17 @@ export default function DashboardPage() {
       count: 0,
       severity: "info",
       icon: Users,
+    });
+  }
+  if (!sourcesConfigured && !sourceSettingsLoading) {
+    actions.push({
+      key: "sources-off",
+      label: "All candidate sources are off",
+      detail: "Enable at least one source so candidate pools can be built.",
+      href: "/candidate-sources",
+      count: 0,
+      severity: "warn",
+      icon: AlertTriangle,
     });
   }
   if (pending.length > 0) {
@@ -497,6 +536,77 @@ export default function DashboardPage() {
 
       {/* Priority actions (auto-hides when none) */}
       <PriorityActions actions={actions} />
+
+      {/* Candidate source summary — counts + which sources are enabled
+          for new jobs by default. Reads `useSourceCounts` and
+          `useOrgSourceSettings`; auto-hides if both are unavailable. */}
+      {sourceCounts && sourceSettings && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="glass rounded-xl p-5 space-y-4"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Activity className="h-4 w-4 text-primary" />
+              <h2 className="font-heading text-[15px] font-semibold text-foreground">
+                Candidate sources
+              </h2>
+            </div>
+            <Link
+              href="/candidate-sources"
+              className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:underline"
+            >
+              Manage <ChevronRight className="h-3 w-3" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            {(
+              [
+                { key: "paths_profile",     flag: "use_paths_profiles_default" },
+                { key: "sourced",           flag: "use_sourced_candidates_default" },
+                { key: "company_uploaded",  flag: "use_uploaded_candidates_default" },
+                { key: "job_fair",          flag: "use_job_fair_candidates_default" },
+                { key: "ats_import",        flag: "use_ats_candidates_default" },
+              ] as { key: SourceTypeKey; flag: keyof typeof sourceSettings }[]
+            ).map((row) => {
+              const entry = sourceCounts.counts.find((c) => c.source_type === row.key);
+              const enabled = !!sourceSettings[row.flag as keyof typeof sourceSettings];
+              return (
+                <div
+                  key={row.key}
+                  className={cn(
+                    "rounded-lg border px-3 py-2.5 transition-colors",
+                    enabled
+                      ? "border-border/40 bg-background/40"
+                      : "border-border/20 bg-muted/10 opacity-70",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground truncate">
+                      {entry?.label ?? row.key}
+                    </p>
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        enabled ? "bg-emerald-400" : "bg-muted-foreground/30",
+                      )}
+                      aria-label={enabled ? "enabled" : "disabled"}
+                    />
+                  </div>
+                  <p className="mt-1.5 font-mono text-lg font-semibold text-foreground">
+                    {entry?.count ?? 0}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {enabled ? "Default ON" : "Default OFF"}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+      )}
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

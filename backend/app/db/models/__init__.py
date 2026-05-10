@@ -78,6 +78,12 @@ from app.db.models.evidence import EvidenceItem, CandidateSource
 from app.db.models.hitl import HITLApproval
 from app.db.models.contact_enrichment import EnrichedContact
 from app.db.models.identity_resolution import CandidateDuplicate, MergeHistory
+from app.db.models.candidate_sourcing import (
+    OrganizationCandidateSourceSettings,
+    JobCandidatePoolConfig,
+    CandidatePoolRun,
+    CandidatePoolMember,
+)
 
 __all__ = [
     "Base",
@@ -170,4 +176,9 @@ __all__ = [
     # Identity Resolution
     "CandidateDuplicate",
     "MergeHistory",
+    # Candidate Sourcing & Pool
+    "OrganizationCandidateSourceSettings",
+    "JobCandidatePoolConfig",
+    "CandidatePoolRun",
+    "CandidatePoolMember",
 ]

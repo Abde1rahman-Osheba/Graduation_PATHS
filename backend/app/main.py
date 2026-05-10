@@ -114,6 +114,7 @@ from app.api.v1.organizations import router as organizations_router  # noqa: E40
 from app.api.v1.job_ingestion import router as job_ingestion_router  # noqa: E402
 from app.api.v1.admin import router as admin_router  # noqa: E402
 from app.api.v1.platform_admin import router as platform_admin_router  # noqa: E402
+from app.api.v1.candidate_sourcing import router as candidate_sourcing_router  # noqa: E402
 from app.api.v1.job_import import router as job_import_router  # noqa: E402
 from app.api.v1.scoring import router as scoring_router  # noqa: E402
 from app.api.v1.organization_matching import (  # noqa: E402
@@ -155,6 +156,7 @@ app.include_router(system_router, prefix="/api/v1")
 app.include_router(job_ingestion_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(platform_admin_router, prefix="/api/v1")
+app.include_router(candidate_sourcing_router, prefix="/api/v1")
 app.include_router(job_import_router, prefix="/api/v1")
 app.include_router(scoring_router, prefix="/api/v1")
 app.include_router(organization_matching_router, prefix="/api/v1")

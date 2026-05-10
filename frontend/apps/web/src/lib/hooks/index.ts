@@ -613,6 +613,8 @@ export const usePublicJobs = () =>
         level: j.seniority_level ?? "Mid",
         postedAt: new Date().toISOString().split("T")[0],
         applicants: j.applicant_count ?? 0,
+        applicationMode: j.application_mode ?? "internal_apply",
+        externalApplyUrl: j.external_apply_url ?? null,
       }));
     },
     staleTime: 120_000,
@@ -1612,3 +1614,96 @@ export const useRejectContact = () => {
     },
   });
 };
+
+
+// ── Candidate Sourcing & Pool ─────────────────────────────────────────────
+//
+// All hooks here return real backend data from the candidate-sourcing API.
+// There is no mock fallback — when the backend is unreachable, these queries
+// surface the error and the UI is responsible for showing an honest state.
+
+import {
+  candidateSourcingApi,
+  type OrgSourceSettingsUpdate,
+  type JobPoolConfigUpdate,
+} from "@/lib/api";
+
+export const useSourceCatalog = () =>
+  useQuery({
+    queryKey: ["candidate-source-catalog"],
+    queryFn: candidateSourcingApi.catalog,
+    staleTime: 5 * 60_000, // catalog is static-ish
+  });
+
+export const useOrgSourceSettings = () =>
+  useQuery({
+    queryKey: ["candidate-source-settings"],
+    queryFn: candidateSourcingApi.getSettings,
+    retry: false,
+  });
+
+export const useUpdateOrgSourceSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: OrgSourceSettingsUpdate) =>
+      candidateSourcingApi.updateSettings(body),
+    onSuccess: (data) => {
+      qc.setQueryData(["candidate-source-settings"], data);
+      qc.invalidateQueries({ queryKey: ["candidate-source-counts"] });
+    },
+  });
+};
+
+export const useSourceCounts = () =>
+  useQuery({
+    queryKey: ["candidate-source-counts"],
+    queryFn: candidateSourcingApi.counts,
+    retry: false,
+  });
+
+export const useJobPoolConfig = (jobId: string | null | undefined) =>
+  useQuery({
+    queryKey: ["job-pool-config", jobId],
+    queryFn: () => candidateSourcingApi.getJobPoolConfig(jobId as string),
+    enabled: !!jobId,
+    retry: false,
+  });
+
+export const useUpdateJobPoolConfig = (jobId: string | null | undefined) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: JobPoolConfigUpdate) =>
+      candidateSourcingApi.updateJobPoolConfig(jobId as string, body),
+    onSuccess: (data) => {
+      qc.setQueryData(["job-pool-config", jobId], data);
+    },
+  });
+};
+
+export const usePreviewJobPool = (jobId: string | null | undefined) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => candidateSourcingApi.previewJobPool(jobId as string),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["job-pool-preview", jobId] });
+    },
+  });
+};
+
+export const useBuildJobPool = (jobId: string | null | undefined) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => candidateSourcingApi.buildJobPool(jobId as string),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["job-pool-runs", jobId] });
+    },
+  });
+};
+
+export const useJobPoolRuns = (jobId: string | null | undefined) =>
+  useQuery({
+    queryKey: ["job-pool-runs", jobId],
+    queryFn: () => candidateSourcingApi.listPoolRuns(jobId as string),
+    enabled: !!jobId,
+    retry: false,
+  });
