@@ -25,6 +25,7 @@ class Application(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     source_channel: Mapped[str | None] = mapped_column(String(100), nullable=True)
     current_stage_code: Mapped[str] = mapped_column(String(50), nullable=False, default="applied")
     overall_status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+    pipeline_stage: Mapped[str] = mapped_column(String(50), nullable=False, default="screen")
 
     # Relationships
     candidate = relationship("Candidate", back_populates="applications", lazy="selectin")

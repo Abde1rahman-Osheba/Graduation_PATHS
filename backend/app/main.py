@@ -146,6 +146,8 @@ from app.api.v1.idss import (  # noqa: E402
     decision_extra_router,
     plans_router,
 )
+from app.api.v1.job_detail import router as job_detail_router  # noqa: E402
+from app.api.v1.candidate_applications import router as candidate_applications_router  # noqa: E402
 
 # ── Register routers ───────────────────────────────────────────────────
 app.include_router(auth_router, prefix="/api/v1")
@@ -185,6 +187,8 @@ app.include_router(plans_router, prefix="/api/v1")
 app.include_router(candidate_plans_router, prefix="/api/v1")
 # Health router exposes /api/v1/health/databases plus the legacy
 # per-service paths used by integration tests.
+app.include_router(job_detail_router, prefix="/api/v1")
+app.include_router(candidate_applications_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
 
 

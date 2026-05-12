@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 
@@ -11,10 +11,11 @@ from app.core.dependencies import (
 )
 from app.core.security import decode_access_token
 from app.core.database import get_db
-from app.db.models.application import Application
+from app.db.models.application import Application, AuditEvent
 from app.db.models.candidate import Candidate
 from app.db.models.cv_entities import CandidateSkill, CandidateExperience, CandidateEducation, CandidateCertification
 from app.db.models.job import Job as JobModel
+from app.db.models.scoring import CandidateJobScore
 from app.db.models.user import User
 from app.schemas.candidate import CandidateProfileOut, CandidateProfileUpdateRequest
 
@@ -159,6 +160,20 @@ async def apply_to_job(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Job not found or no longer accepting applications",
         )
+
+    # External scraped jobs: redirect candidate to original posting
+    app_mode = getattr(job, "application_mode", "internal_apply")
+    if app_mode == "external_redirect":
+        ext_url = job.external_apply_url or job.source_url
+        if not ext_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This external job has no apply URL configured",
+            )
+        return {
+            "external_apply_url": ext_url,
+            "message": "This job is hosted externally. Redirecting to original posting.",
+        }
 
     # Duplicate check — 409 Conflict
     existing = db.execute(
@@ -309,4 +324,142 @@ async def get_candidate(
         "experiences": [{"company": e.company_name, "title": e.title} for e in experiences],
         "education": [{"institution": e.institution, "degree": e.degree} for e in education],
         "certifications": [{"name": c.name, "issuer": c.issuer} for c in certifications]
+    }
+
+
+@router.get("/{candidate_id}/profile")
+async def get_candidate_profile_detail(
+    candidate_id: str,
+    job_id: str | None = Query(default=None, description="Include scores for this job"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    bearer_token: str = Depends(oauth2_scheme),
+):
+    """Full candidate profile: CV + score breakdown + activity timeline."""
+    try:
+        cand_uuid = uuid.UUID(candidate_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid candidate_id UUID")
+
+    _ensure_can_read_candidate(db, current_user, bearer_token, cand_uuid)
+
+    cand = db.get(Candidate, cand_uuid)
+    if not cand:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    # CV layers
+    experiences = db.execute(
+        select(CandidateExperience)
+        .where(CandidateExperience.candidate_id == cand_uuid)
+        .order_by(desc(CandidateExperience.start_date))
+    ).scalars().all()
+
+    education = db.execute(
+        select(CandidateEducation)
+        .where(CandidateEducation.candidate_id == cand_uuid)
+    ).scalars().all()
+
+    skills = db.execute(
+        select(CandidateSkill).where(CandidateSkill.candidate_id == cand_uuid)
+    ).scalars().all()
+
+    certifications = db.execute(
+        select(CandidateCertification).where(CandidateCertification.candidate_id == cand_uuid)
+    ).scalars().all()
+
+    # Scores (for a specific job context if provided)
+    scores = []
+    overall_score = None
+    pipeline_stage = None
+
+    if job_id:
+        try:
+            job_uuid = uuid.UUID(job_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid job_id UUID")
+
+        score_row = db.execute(
+            select(CandidateJobScore)
+            .where(
+                CandidateJobScore.candidate_id == cand_uuid,
+                CandidateJobScore.job_id == job_uuid,
+            )
+            .order_by(desc(CandidateJobScore.scored_at))
+            .limit(1)
+        ).scalar_one_or_none()
+
+        if score_row:
+            overall_score = float(score_row.final_score)
+            breakdown = score_row.criteria_breakdown or {}
+            for criterion, detail in breakdown.items():
+                if isinstance(detail, dict):
+                    scores.append({
+                        "criterion": criterion,
+                        "score": detail.get("score"),
+                        "weight": detail.get("weight"),
+                        "reasoning": detail.get("reasoning"),
+                    })
+
+        app_row = db.execute(
+            select(Application)
+            .where(Application.candidate_id == cand_uuid, Application.job_id == job_uuid)
+            .limit(1)
+        ).scalar_one_or_none()
+        if app_row:
+            pipeline_stage = app_row.pipeline_stage
+
+    # Activity timeline from audit_events
+    activity_rows = db.execute(
+        select(AuditEvent)
+        .where(AuditEvent.entity_id == str(cand_uuid))
+        .order_by(desc(AuditEvent.created_at))
+        .limit(20)
+    ).scalars().all()
+
+    activity = [
+        {
+            "type": row.action,
+            "at": row.created_at.isoformat(),
+            "actor": row.actor_id,
+            "payload": row.after_jsonb or {},
+        }
+        for row in activity_rows
+    ]
+
+    return {
+        "id": str(cand.id),
+        "name": cand.full_name,
+        "headline": cand.headline,
+        "location": cand.location_text,
+        "email_masked": (cand.email[:3] + "***@***" + cand.email.split("@")[-1][-4:]) if cand.email else None,
+        "phone_masked": ("***-***-" + cand.phone[-4:]) if cand.phone else None,
+        "current_role": cand.current_title,
+        "years_experience": cand.years_experience,
+        "overall_score": overall_score,
+        "pipeline_stage": pipeline_stage,
+        "cv": {
+            "experience": [
+                {
+                    "company": e.company_name,
+                    "title": e.title,
+                    "start_date": e.start_date.isoformat() if e.start_date else None,
+                    "end_date": e.end_date.isoformat() if e.end_date else None,
+                    "description": e.description,
+                }
+                for e in experiences
+            ],
+            "education": [
+                {
+                    "institution": e.institution,
+                    "degree": e.degree,
+                    "field": e.field_of_study,
+                    "graduation_year": e.graduation_year,
+                }
+                for e in education
+            ],
+            "skills": [{"skill_id": str(s.skill_id), "proficiency": s.proficiency_score} for s in skills],
+            "certifications": [{"name": c.name, "issuer": c.issuer} for c in certifications],
+        },
+        "scores": scores,
+        "activity": activity,
     }

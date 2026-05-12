@@ -4,8 +4,9 @@
  * All hooks return frontend types (camelCase). Backend responses are adapted
  * through the adapters layer so pages never see snake_case or backend shapes.
  *
- * Org/recruiter data: real API only — no mock fallback when the backend is
- * configured. Without NEXT_PUBLIC_API_URL, list queries return empty shapes.
+ * Org/recruiter data: always call the real API. The client defaults
+ * NEXT_PUBLIC_API_URL to http://localhost:8001; unreachable backends surface
+ * via TanStack Query error states (no silent empty fallbacks).
  */
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -41,6 +42,8 @@ import {
   contactEnrichmentApi,
   kbApi,
   type BackendQdrantCollection,
+  getApiHealth,
+  type BackendJob,
 } from "@/lib/api";
 
 import type {
@@ -68,38 +71,17 @@ import {
 } from "@/lib/api/adapters";
 
 import type { CandidateProfile } from "@/types/candidate-profile.types";
-import type { DashboardStats } from "@/types";
-import {
-  adaptBackendCandidateProfileOut,
-  createEmptyCandidateProfile,
-} from "@/lib/candidate/portal-profile";
+import { adaptBackendCandidateProfileOut } from "@/lib/candidate/portal-profile";
 
 import { useAuthStore } from "@/lib/stores/auth.store";
 
-// ── Fallback helper ───────────────────────────────────────────────────────
-
-const HAS_BACKEND = Boolean(process.env.NEXT_PUBLIC_API_URL);
-
-const EMPTY_DASHBOARD_STATS: DashboardStats = {
-  activeJobs: 0,
-  totalCandidates: 0,
-  pendingApprovals: 0,
-  avgTimeToHire: 0,
-  thisWeekApplications: 0,
-  shortlistedToday: 0,
-  interviewsScheduled: 0,
-  hiredThisMonth: 0,
-};
-
-/** Recruiter/org routes: never substitute mock Sara/demo rows. */
-async function orgEntityQuery<T>(real: () => Promise<T>, whenNoBackend: T): Promise<T> {
-  if (!HAS_BACKEND) return whenNoBackend;
+/** Recruiter/org routes: always call the API. */
+async function orgEntityQuery<T>(real: () => Promise<T>): Promise<T> {
   return real();
 }
 
-/** Candidate portal: never substitute another user's mock data — surface errors or empty state. */
-async function portalQuery<T>(real: () => Promise<T>, empty: T): Promise<T> {
-  if (!HAS_BACKEND) return empty;
+/** Candidate portal: always call the API. */
+async function portalQuery<T>(real: () => Promise<T>): Promise<T> {
   return real();
 }
 
@@ -141,7 +123,7 @@ function normalizeAppStatus(raw: string): PortalApplicationRow["status"] {
 export const useCandidates = () =>
   useQuery({
     queryKey: ["candidates"],
-    queryFn: () => orgEntityQuery(async () => [], []),
+    queryFn: () => orgEntityQuery(async () => []),
   });
 
 export const useCandidate = (id: string) =>
@@ -153,7 +135,7 @@ export const useCandidate = (id: string) =>
           typeof adaptRecruiterCandidateDetail
         >[0],
       ),
-    enabled: Boolean(id) && HAS_BACKEND,
+    enabled: Boolean(id),
   });
 
 export const useCandidateSearch = (query: string) =>
@@ -184,19 +166,13 @@ export const useJobs = (filters: JobsListFilters = {}) =>
       filters.offset ?? null,
     ],
     queryFn: () =>
-      orgEntityQuery(async () => adaptJobs(await jobsApi.list(filters)), []),
+      orgEntityQuery(async () => adaptJobs(await jobsApi.list(filters))),
   });
 
 export const useJobImportStatus = () =>
   useQuery({
     queryKey: ["jobs", "import-status"],
-    queryFn: () => orgEntityQuery(() => jobsApi.importStatus(), {
-      last_run_at: null,
-      last_success: null,
-      last_inserted_count: null,
-      last_error: null,
-    }),
-    enabled: HAS_BACKEND,
+    queryFn: () => orgEntityQuery(() => jobsApi.importStatus()),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
@@ -221,7 +197,7 @@ export const useJob = (id: string) =>
   useQuery({
     queryKey: ["jobs", id],
     queryFn: async () => adaptJob(await jobsApi.get(id)),
-    enabled: Boolean(id) && HAS_BACKEND,
+    enabled: Boolean(id),
   });
 
 // ── Application hooks ─────────────────────────────────────────────────────
@@ -230,9 +206,8 @@ export const useApplications = () =>
   useQuery({
     queryKey: ["applications"],
     queryFn: () =>
-      orgEntityQuery(
-        async () => adaptApplications(await applicationsApi.list()),
-        [],
+      orgEntityQuery(async () =>
+        adaptApplications(await applicationsApi.list()),
       ),
   });
 
@@ -240,9 +215,8 @@ export const useApplicationsByJob = (jobId: string) =>
   useQuery({
     queryKey: ["applications", "job", jobId],
     queryFn: () =>
-      orgEntityQuery(
-        async () => adaptApplications(await applicationsApi.listByJob(jobId)),
-        [],
+      orgEntityQuery(async () =>
+        adaptApplications(await applicationsApi.listByJob(jobId)),
       ),
     enabled: Boolean(jobId),
   });
@@ -251,9 +225,8 @@ export const useShortlist = (jobId: string) =>
   useQuery({
     queryKey: ["shortlist", jobId],
     queryFn: () =>
-      orgEntityQuery(
-        async () => adaptShortlist(await applicationsApi.shortlist(jobId), jobId),
-        [],
+      orgEntityQuery(async () =>
+        adaptShortlist(await applicationsApi.shortlist(jobId), jobId),
       ),
     enabled: Boolean(jobId),
   });
@@ -262,7 +235,7 @@ export const useApplication = (id: string) =>
   useQuery({
     queryKey: ["applications", id],
     queryFn: async () => adaptApplications([await applicationsApi.get(id)])[0],
-    enabled: Boolean(id) && HAS_BACKEND,
+    enabled: Boolean(id),
   });
 
 export const useAdvanceStage = () => {
@@ -283,9 +256,8 @@ export const useApprovals = (statusFilter?: string) =>
   useQuery({
     queryKey: ["approvals", statusFilter ?? "all"],
     queryFn: () =>
-      orgEntityQuery(
-        async () => adaptApprovals(await approvalsApi.list(statusFilter)),
-        [],
+      orgEntityQuery(async () =>
+        adaptApprovals(await approvalsApi.list(statusFilter)),
       ),
   });
 
@@ -293,9 +265,8 @@ export const usePendingApprovals = () =>
   useQuery({
     queryKey: ["approvals", "pending"],
     queryFn: () =>
-      orgEntityQuery(
-        async () => adaptApprovals(await approvalsApi.pending()),
-        [],
+      orgEntityQuery(async () =>
+        adaptApprovals(await approvalsApi.pending()),
       ),
     refetchInterval: 30_000,
   });
@@ -324,7 +295,7 @@ export const useMembers = () =>
   useQuery({
     queryKey: ["members"],
     queryFn: () =>
-      orgEntityQuery(async () => adaptMembers(await membersApi.list()), []),
+      orgEntityQuery(async () => adaptMembers(await membersApi.list())),
   });
 
 export const useInviteMember = () => {
@@ -355,16 +326,8 @@ export const useOrganization = () =>
   useQuery({
     queryKey: ["organization"],
     queryFn: () =>
-      orgEntityQuery(
-        async () => adaptOrganizationFromBackend(await organizationApi.getMe()),
-        adaptOrganizationFromBackend({
-          id: "",
-          name: "",
-          slug: "",
-          industry: null,
-          contactEmail: null,
-          isActive: false,
-        }),
+      orgEntityQuery(async () =>
+        adaptOrganizationFromBackend(await organizationApi.getMe()),
       ),
   });
 
@@ -374,9 +337,8 @@ export const useAuditEvents = (search?: string) =>
   useQuery({
     queryKey: ["audit", search ?? ""],
     queryFn: () =>
-      orgEntityQuery(
-        async () => adaptAuditEvents(await backendAuditApi.list(search)),
-        [],
+      orgEntityQuery(async () =>
+        adaptAuditEvents(await backendAuditApi.list(search)),
       ),
   });
 
@@ -386,9 +348,8 @@ export const useDashboardStats = () =>
   useQuery({
     queryKey: ["dashboard", "stats"],
     queryFn: () =>
-      orgEntityQuery(
-        async () => adaptDashboardStats(await backendDashboardApi.stats()),
-        EMPTY_DASHBOARD_STATS,
+      orgEntityQuery(async () =>
+        adaptDashboardStats(await backendDashboardApi.stats()),
       ),
   });
 
@@ -396,24 +357,38 @@ export const useFunnelData = () =>
   useQuery({
     queryKey: ["dashboard", "funnel"],
     queryFn: () =>
-      orgEntityQuery(async () => adaptFunnel(await backendDashboardApi.funnel()), []),
+      orgEntityQuery(async () =>
+        adaptFunnel(await backendDashboardApi.funnel()),
+      ),
   });
 
 export const useWeeklyApplications = () =>
   useQuery({
     queryKey: ["dashboard", "weekly"],
-    queryFn: () => orgEntityQuery(async () => [], [] as { week: string; applications: number; shortlisted: number }[]),
+    queryFn: () =>
+      orgEntityQuery(
+        async () =>
+          [] as { week: string; applications: number; shortlisted: number }[],
+      ),
   });
 
 export const useAgentStatus = () =>
   useQuery({
     queryKey: ["agents"],
     queryFn: () =>
-      orgEntityQuery(
-        async () => adaptAgents(await backendDashboardApi.agents()),
-        [],
+      orgEntityQuery(async () =>
+        adaptAgents(await backendDashboardApi.agents()),
       ),
     refetchInterval: 15_000,
+  });
+
+/** GET /api/v1/health — connectivity check (no auth). */
+export const useApiHealth = () =>
+  useQuery({
+    queryKey: ["health", "api"],
+    queryFn: () => getApiHealth(),
+    staleTime: 0,
+    retry: 2,
   });
 
 // ── Evidence hooks ────────────────────────────────────────────────────────
@@ -497,9 +472,8 @@ export const useCandidateProfile = () =>
   useQuery({
     queryKey: ["candidate-profile"],
     queryFn: () =>
-      portalQuery(
-        async () => adaptBackendCandidateProfileOut(await candidatePortalApi.getProfile()),
-        createEmptyCandidateProfile(),
+      portalQuery(async () =>
+        adaptBackendCandidateProfileOut(await candidatePortalApi.getProfile()),
       ),
     staleTime: 60_000,
   });
@@ -536,7 +510,7 @@ export const useCandidateApplications = () =>
               app.current_stage_code.slice(1).replace(/_/g, " "),
           }),
         );
-      }, []),
+      }),
   });
 
 /**
@@ -598,7 +572,6 @@ export const usePublicJobs = () =>
   useQuery({
     queryKey: ["public-jobs"],
     queryFn: async () => {
-      if (!HAS_BACKEND) return [];
       const jobs = await publicJobsApi.list();
       return jobs.map((j) => ({
         id: String(j.id),
@@ -762,7 +735,7 @@ export const useInterviews = (orgId: string) =>
   useQuery({
     queryKey: ["interviews", orgId],
     queryFn: async () => {
-      const rows = await orgEntityQuery(() => interviewsApi.list(orgId), []);
+      const rows = await orgEntityQuery(() => interviewsApi.list(orgId));
       return rows.map((row) => ({
         id: row.interview_id,
         applicationId: row.application_id,
@@ -1005,7 +978,7 @@ export const useInterviewSession = (sessionId: string) =>
   useQuery({
     queryKey: ["interview-session", sessionId],
     queryFn: () => interviewRuntimeApi.getSession(sessionId),
-    enabled: Boolean(sessionId) && HAS_BACKEND,
+    enabled: Boolean(sessionId),
   });
 
 export const useGenerateInterviewQuestionsRuntime = () =>
@@ -1075,7 +1048,7 @@ export const useInterviewReport = (sessionId: string, enabled = true) =>
   useQuery({
     queryKey: ["interview-report", sessionId],
     queryFn: () => interviewRuntimeApi.getReport(sessionId),
-    enabled: Boolean(sessionId) && enabled && HAS_BACKEND,
+    enabled: Boolean(sessionId) && enabled,
   });
 
 // ── Open-to-Work Candidate Sourcing hooks ─────────────────────────────────
@@ -1083,16 +1056,7 @@ export const useInterviewReport = (sessionId: string, enabled = true) =>
 export const useSourcingStatus = () =>
   useQuery({
     queryKey: ["sourcing", "status"],
-    queryFn: () => orgEntityQuery(() => sourcingApi.status(), {
-      enabled: false,
-      provider: "mock",
-      interval_minutes: 60,
-      max_per_run: 0,
-      reasoning_enabled: false,
-      reasoning_model: "",
-      metadata: null,
-    }),
-    enabled: HAS_BACKEND,
+    queryFn: () => orgEntityQuery(() => sourcingApi.status()),
     staleTime: 30_000,
   });
 
@@ -1111,14 +1075,7 @@ export const useSourcedCandidates = (filters: SourcedListFilters = {}) =>
       filters.limit ?? null,
       filters.offset ?? null,
     ],
-    queryFn: () =>
-      orgEntityQuery(() => sourcingApi.list(filters), {
-        organization_id: "",
-        total: 0,
-        items: [],
-        job_id: null,
-        filters: {},
-      }),
+    queryFn: () => orgEntityQuery(() => sourcingApi.list(filters)),
   });
 
 export const useSourcedMatchForJob = (
@@ -1138,15 +1095,8 @@ export const useSourcedMatchForJob = (
       filters.minScore ?? null,
     ],
     queryFn: () =>
-      orgEntityQuery(() => sourcingApi.matchForJob(jobId, filters), {
-        organization_id: "",
-        job_id: jobId,
-        total: 0,
-        top_k: filters.topK ?? 10,
-        items: [],
-        filters: {},
-      }),
-    enabled: Boolean(jobId) && enabled && HAS_BACKEND,
+      orgEntityQuery(() => sourcingApi.matchForJob(jobId, filters)),
+    enabled: Boolean(jobId) && enabled,
   });
 
 export const useExplainSourcedMatch = () =>
@@ -1175,16 +1125,7 @@ export const useRunSourcingImport = () => {
 export const useGoogleIntegrationStatus = () =>
   useQuery({
     queryKey: ["google-integration", "status"],
-    queryFn: () =>
-      orgEntityQuery(() => googleIntegrationApi.status(), {
-        connected: false,
-        configured: false,
-        email: null,
-        expires_at: null,
-        scopes: [] as string[],
-        last_error: null,
-      }),
-    enabled: HAS_BACKEND,
+    queryFn: () => orgEntityQuery(() => googleIntegrationApi.status()),
     refetchInterval: 30_000,
   });
 
@@ -1238,11 +1179,8 @@ export const useOutreachHistory = (candidateId: string) =>
   useQuery({
     queryKey: ["outreach-history", candidateId],
     queryFn: () =>
-      orgEntityQuery(() => outreachAgentApi.history(candidateId), {
-        candidate_id: candidateId,
-        items: [],
-      }),
-    enabled: Boolean(candidateId) && HAS_BACKEND,
+      orgEntityQuery(() => outreachAgentApi.history(candidateId)),
+    enabled: Boolean(candidateId),
   });
 
 export const usePublicSchedule = (token: string) =>
@@ -1278,7 +1216,7 @@ export const useDecisionReport = (packetId: string, orgId: string, enabled = tru
   useQuery({
     queryKey: ["decision-report", packetId],
     queryFn: () => dssApi.decisionReport(packetId, orgId),
-    enabled: Boolean(packetId) && Boolean(orgId) && enabled && HAS_BACKEND,
+    enabled: Boolean(packetId) && Boolean(orgId) && enabled,
   });
 
 export const useManagerDecision = () => {
@@ -1330,7 +1268,7 @@ export const useDevelopmentPlan = (planId: string, orgId: string, enabled = true
   useQuery({
     queryKey: ["development-plan", planId],
     queryFn: () => _devPlansApi.get(planId, orgId),
-    enabled: Boolean(planId) && Boolean(orgId) && enabled && HAS_BACKEND,
+    enabled: Boolean(planId) && Boolean(orgId) && enabled,
   });
 
 export const useApprovePlan = () => {
@@ -1431,7 +1369,6 @@ export const useDuplicates = (status?: string) =>
   useQuery({
     queryKey: ["identity-resolution", "duplicates", status ?? "all"],
     queryFn: () => identityResolutionApi.listDuplicates(status),
-    enabled: HAS_BACKEND,
   });
 
 export const useApproveMerge = () => {
@@ -1461,7 +1398,6 @@ export const useMergeHistory = () =>
   useQuery({
     queryKey: ["merge-history"],
     queryFn: () => identityResolutionApi.getMergeHistory(),
-    enabled: HAS_BACKEND,
   });
 
 // ── Assessment Agent hooks ──────────────────────────────────────────────────
@@ -1475,14 +1411,13 @@ export const useAssessments = (params?: {
   useQuery({
     queryKey: ["assessments", params],
     queryFn: () => assessmentsApi.list(params),
-    enabled: HAS_BACKEND,
   });
 
 export const useAssessment = (id: string) =>
   useQuery({
     queryKey: ["assessments", id],
     queryFn: () => assessmentsApi.get(id),
-    enabled: Boolean(id) && HAS_BACKEND,
+    enabled: Boolean(id),
   });
 
 export const useCreateAssessment = () => {
@@ -1522,8 +1457,6 @@ export const useDeleteAssessment = () => {
 
 // ── Knowledge Base hooks ───────────────────────────────────────────────────
 
-const HAS_KB = Boolean(process.env.NEXT_PUBLIC_API_URL);
-
 async function enrichCollection(
   name: string,
 ): Promise<BackendQdrantCollection> {
@@ -1538,7 +1471,6 @@ export function useCollections() {
   return useQuery<BackendQdrantCollection[]>({
     queryKey: ["kb", "collections"],
     queryFn: async () => {
-      if (!HAS_KB) return [];
       const { collections: names } = await kbApi.listCollections();
       const detailed = await Promise.all(names.map(enrichCollection));
       return detailed;
@@ -1570,7 +1502,6 @@ export const useContactEnrichmentStatus = () =>
   useQuery({
     queryKey: ["contact-enrichment", "status"],
     queryFn: () => contactEnrichmentApi.status(),
-    enabled: HAS_BACKEND,
   });
 
 export const useEnrichedContacts = (params?: {
@@ -1580,7 +1511,6 @@ export const useEnrichedContacts = (params?: {
   useQuery({
     queryKey: ["contact-enrichment", "contacts", params],
     queryFn: () => contactEnrichmentApi.list(params),
-    enabled: HAS_BACKEND,
   });
 
 export const useApproveContact = () => {
@@ -1707,3 +1637,89 @@ export const useJobPoolRuns = (jobId: string | null | undefined) =>
     enabled: !!jobId,
     retry: false,
   });
+
+// ── Phase 1: Job Detail Hub hooks ─────────────────────────────────────────
+
+import {
+  getJobDetail,
+  getJobPipelineStages,
+  getJobCandidates,
+  moveApplicationStage,
+  putFairnessRubric,
+  getCandidateDetail,
+  type JobCandidatesQuery,
+  type FairnessRubricInput,
+  type PipelineStage as ApiPipelineStage,
+} from "@/lib/api/index";
+import {
+  adaptJobDetail,
+  adaptPipelineStages,
+  adaptCandidateList,
+  adaptCandidateDetail,
+} from "@/lib/api/adapters";
+
+export const useJobDetail = (id: string | null | undefined) =>
+  useQuery({
+    queryKey: ["job", id],
+    queryFn: async () => adaptJobDetail(await getJobDetail(id as string)),
+    enabled: !!id,
+    staleTime: 30_000,
+  });
+
+export const useJobPipelineStages = (id: string | null | undefined) =>
+  useQuery({
+    queryKey: ["jobPipelineStages", id],
+    queryFn: async () => adaptPipelineStages(await getJobPipelineStages(id as string)),
+    enabled: !!id,
+    staleTime: 15_000,
+  });
+
+export const useJobCandidates = (id: string | null | undefined, q: JobCandidatesQuery = {}) =>
+  useQuery({
+    queryKey: ["jobCandidates", id, q],
+    queryFn: async () => adaptCandidateList(await getJobCandidates(id as string, q)),
+    enabled: !!id,
+    staleTime: 15_000,
+  });
+
+export const useMoveApplicationStage = (jobId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ appId, stage }: { appId: string; stage: ApiPipelineStage }) =>
+      moveApplicationStage(appId, stage),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["job", jobId] });
+      qc.invalidateQueries({ queryKey: ["jobPipelineStages", jobId] });
+      qc.invalidateQueries({ queryKey: ["jobCandidates", jobId] });
+    },
+  });
+};
+
+export const useUpdateFairnessRubric = (jobId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rubric: FairnessRubricInput) => putFairnessRubric(jobId, rubric),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["job", jobId] });
+    },
+  });
+};
+
+export const useCandidateDetail = (candidateId: string | null | undefined, jobId?: string) =>
+  useQuery({
+    queryKey: ["candidateDetail", candidateId, jobId],
+    queryFn: async () =>
+      adaptCandidateDetail(await getCandidateDetail(candidateId as string, jobId)),
+    enabled: !!candidateId,
+    staleTime: 30_000,
+  });
+
+export const useCreateJob = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<BackendJob>) => jobsApi.create(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+};

@@ -1806,6 +1806,17 @@ export interface PoolRunListResponse {
   runs: PoolRunSummary[];
 }
 
+/** GET /api/v1/health — liveness (no auth). */
+export interface BackendHealthResponse {
+  status: string;
+  app_name: string;
+  environment: string;
+}
+
+export function getApiHealth(): Promise<BackendHealthResponse> {
+  return api.get<BackendHealthResponse>("/api/v1/health");
+}
+
 export const candidateSourcingApi = {
   catalog: () =>
     api.get<SourceCatalogResponse>("/api/v1/candidate-source-catalog"),
@@ -1844,3 +1855,163 @@ export const candidateSourcingApi = {
       `/api/v1/jobs/${encodeURIComponent(jobId)}/candidate-pool/runs`,
     ),
 };
+
+// ── Phase 1: Job Detail Hub ──────────────────────────────────────────────
+
+export type PipelineStage =
+  | "define" | "source" | "screen" | "shortlist"
+  | "reveal" | "outreach" | "interview" | "evaluate" | "decide";
+
+export interface BackendFairnessRubric {
+  protected_attrs: Record<string, boolean>;
+  disparate_impact_threshold: number;
+  enabled: boolean;
+}
+
+export interface BackendStageStats {
+  define: number; source: number; screen: number; shortlist: number;
+  reveal: number; outreach: number; interview: number; evaluate: number; decide: number;
+}
+
+export interface BackendJobStats {
+  total_candidates: number;
+  by_stage: BackendStageStats;
+}
+
+export interface BackendSkillWeight { name: string; weight: number; }
+
+export interface BackendJobDetail {
+  id: string;
+  title: string;
+  department: string | null;
+  location: string | null;
+  employment_type: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  description: string | null;
+  required_skills: BackendSkillWeight[];
+  optional_skills: BackendSkillWeight[];
+  status: string;
+  posted_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  stats: BackendJobStats;
+  fairness_rubric: BackendFairnessRubric | null;
+}
+
+export interface BackendStageCandidatePreview {
+  id: string; name: string; score: number | null;
+}
+
+export interface BackendPipelineStage {
+  key: PipelineStage;
+  count: number;
+  preview: BackendStageCandidatePreview[];
+}
+
+export interface BackendPipelineStages {
+  stages: BackendPipelineStage[];
+}
+
+export interface BackendCandidateListItem {
+  id: string;
+  application_id: string;
+  name: string;
+  headline: string | null;
+  overall_score: number | null;
+  pipeline_stage: PipelineStage;
+  source_channel: string | null;
+  created_at: string | null;
+}
+
+export interface BackendCandidateList {
+  items: BackendCandidateListItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface JobCandidatesQuery {
+  stage?: PipelineStage;
+  min_score?: number;
+  source?: string;
+  q?: string;
+  sort?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface BackendScoreCriterion {
+  criterion: string;
+  score: number | null;
+  weight: number | null;
+  reasoning: string | null;
+}
+
+export interface BackendActivityEvent {
+  type: string;
+  at: string;
+  actor: string;
+  payload: Record<string, unknown>;
+}
+
+export interface BackendCandidateDetail {
+  id: string;
+  name: string;
+  headline: string | null;
+  location: string | null;
+  email_masked: string | null;
+  phone_masked: string | null;
+  current_role: string | null;
+  years_experience: number | null;
+  overall_score: number | null;
+  pipeline_stage: PipelineStage | null;
+  cv: {
+    experience: { company: string; title: string; start_date: string | null; end_date: string | null; description: string | null }[];
+    education: { institution: string; degree: string | null; field: string | null; graduation_year: number | null }[];
+    skills: { skill_id: string; proficiency: number | null }[];
+    certifications: { name: string; issuer: string | null }[];
+  };
+  scores: BackendScoreCriterion[];
+  activity: BackendActivityEvent[];
+}
+
+export interface FairnessRubricInput {
+  protected_attrs: Record<string, boolean>;
+  disparate_impact_threshold: number;
+  enabled: boolean;
+}
+
+export async function getJobDetail(id: string): Promise<BackendJobDetail> {
+  return api.get<BackendJobDetail>(`/api/v1/jobs/${encodeURIComponent(id)}/detail`);
+}
+
+export async function getJobPipelineStages(id: string): Promise<BackendPipelineStages> {
+  return api.get<BackendPipelineStages>(`/api/v1/jobs/${encodeURIComponent(id)}/pipeline-stages`);
+}
+
+export async function getJobCandidates(id: string, q: JobCandidatesQuery = {}): Promise<BackendCandidateList> {
+  const params = new URLSearchParams();
+  if (q.stage) params.set("stage", q.stage);
+  if (q.min_score != null) params.set("min_score", String(q.min_score));
+  if (q.source) params.set("source", q.source);
+  if (q.q) params.set("q", q.q);
+  if (q.sort) params.set("sort", q.sort);
+  if (q.page) params.set("page", String(q.page));
+  if (q.page_size) params.set("page_size", String(q.page_size));
+  const qs = params.toString();
+  return api.get<BackendCandidateList>(`/api/v1/jobs/${encodeURIComponent(id)}/candidates${qs ? `?${qs}` : ""}`);
+}
+
+export async function moveApplicationStage(appId: string, stage: PipelineStage): Promise<{ id: string; stage: string; updated_at: string }> {
+  return api.put(`/api/v1/candidate-applications/${encodeURIComponent(appId)}/stage`, { stage });
+}
+
+export async function putFairnessRubric(jobId: string, rubric: FairnessRubricInput) {
+  return api.put(`/api/v1/jobs/${encodeURIComponent(jobId)}/fairness-rubric`, rubric);
+}
+
+export async function getCandidateDetail(candidateId: string, jobId?: string): Promise<BackendCandidateDetail> {
+  const qs = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+  return api.get<BackendCandidateDetail>(`/api/v1/candidates/${encodeURIComponent(candidateId)}/profile${qs}`);
+}

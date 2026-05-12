@@ -389,6 +389,147 @@ export interface SourcingRun {
   agentId: string;
 }
 
+// ─── Phase 1: Job Detail Hub & Pipeline Board ────────────────────────────────
+
+export type KanbanStage =
+  | "define" | "source" | "screen" | "shortlist"
+  | "reveal" | "outreach" | "interview" | "evaluate" | "decide";
+
+export const KANBAN_STAGE_LABELS: Record<KanbanStage, string> = {
+  define: "Define",
+  source: "Source",
+  screen: "Screen",
+  shortlist: "Shortlist",
+  reveal: "Reveal",
+  outreach: "Outreach",
+  interview: "Interview",
+  evaluate: "Evaluate",
+  decide: "Decide",
+};
+
+export const KANBAN_STAGES: KanbanStage[] = [
+  "define", "source", "screen", "shortlist",
+  "reveal", "outreach", "interview", "evaluate", "decide",
+];
+
+export interface FairnessRubricConfig {
+  protectedAttrs: Record<string, boolean>;
+  disparateImpactThreshold: number;
+  enabled: boolean;
+}
+
+export interface SkillWeight { name: string; weight: number; }
+
+export interface StageStats {
+  define: number; source: number; screen: number; shortlist: number;
+  reveal: number; outreach: number; interview: number; evaluate: number; decide: number;
+}
+
+export interface JobDetailStats {
+  totalCandidates: number;
+  byStage: StageStats;
+}
+
+export interface JobDetail {
+  id: string;
+  title: string;
+  department: string | null;
+  location: string | null;
+  employmentType: string | null;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  description: string | null;
+  requiredSkills: SkillWeight[];
+  optionalSkills: SkillWeight[];
+  status: string;
+  postedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  stats: JobDetailStats;
+  fairnessRubric: FairnessRubricConfig | null;
+}
+
+export interface CandidateCardPreview {
+  id: string;
+  name: string;
+  score: number | null;
+}
+
+export interface PipelineColumn {
+  key: KanbanStage;
+  label: string;
+  count: number;
+  preview: CandidateCardPreview[];
+}
+
+export interface CandidateInPipeline {
+  id: string;
+  applicationId: string;
+  name: string;
+  headline: string | null;
+  overallScore: number | null;
+  pipelineStage: KanbanStage;
+  sourceChannel: string | null;
+  createdAt: string | null;
+}
+
+export interface CandidateListPage {
+  items: CandidateInPipeline[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ScoreCriterion {
+  criterion: string;
+  score: number | null;
+  weight: number | null;
+  reasoning: string | null;
+}
+
+export interface ActivityEvent {
+  type: string;
+  at: string;
+  actor: string;
+  payload: Record<string, unknown>;
+}
+
+export interface CvExperience {
+  company: string;
+  title: string;
+  startDate: string | null;
+  endDate: string | null;
+  description: string | null;
+}
+
+export interface CvEducation {
+  institution: string;
+  degree: string | null;
+  field: string | null;
+  graduationYear: number | null;
+}
+
+export interface CandidateDetail {
+  id: string;
+  name: string;
+  headline: string | null;
+  location: string | null;
+  emailMasked: string | null;
+  phoneMasked: string | null;
+  currentRole: string | null;
+  yearsExperience: number | null;
+  overallScore: number | null;
+  pipelineStage: KanbanStage | null;
+  cv: {
+    experience: CvExperience[];
+    education: CvEducation[];
+    skills: { skillId: string; proficiency: number | null }[];
+    certifications: { name: string; issuer: string | null }[];
+  };
+  scores: ScoreCriterion[];
+  activity: ActivityEvent[];
+}
+
 // ─── Agent ───────────────────────────────────────────────────────────────────
 
 export interface AgentStatus {

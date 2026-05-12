@@ -113,9 +113,11 @@ export default function JobsPage() {
             )}
             Run import
           </Button>
-          <Button size="sm" className="gap-1.5 h-9">
-            <Plus className="h-3.5 w-3.5" /> New Job
-          </Button>
+          <Link href="/jobs/new">
+            <Button size="sm" className="gap-1.5 h-9">
+              <Plus className="h-3.5 w-3.5" /> New Job
+            </Button>
+          </Link>
         </div>
       </div>
 
@@ -308,9 +310,11 @@ export default function JobsPage() {
                         <Zap className="h-3 w-3" /> Screening
                       </Button>
                     </Link>
-                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </Button>
+                    <Link href={`/jobs/${job.id}`}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </Link>
                   </div>
                 </div>
               </div>

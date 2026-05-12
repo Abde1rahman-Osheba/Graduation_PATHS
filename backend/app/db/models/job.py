@@ -26,6 +26,20 @@ class Job(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     canonical_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
 
+    # Internal vs external job classification
+    application_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="internal_apply",
+        comment="internal_apply | external_redirect",
+    )
+    external_apply_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visibility: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="public",
+        comment="public | private | org_only",
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True,
+    )
+
     # Spec-compliant generic source fields used by the hourly Job_Scraper-main
     # integration (`source_platform` / `source_external_id`). Existing
     # source_type / source_name are kept for the legacy job_ingestion flow.
@@ -104,3 +118,4 @@ class Job(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Relationships
     organization = relationship("Organization", back_populates="jobs", lazy="selectin")
     applications = relationship("Application", back_populates="job", lazy="selectin")
+    fairness_rubric = relationship("FairnessRubric", back_populates="job", uselist=False, lazy="selectin")
