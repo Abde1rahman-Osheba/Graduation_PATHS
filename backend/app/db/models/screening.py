@@ -77,6 +77,11 @@ class ScreeningRun(Base):
         cascade="all, delete-orphan",
         order_by="ScreeningResult.rank_position",
     )
+    bias_reports = relationship(
+        "BiasReport",
+        back_populates="screening_run",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return (

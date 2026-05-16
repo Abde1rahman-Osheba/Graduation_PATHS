@@ -5,16 +5,22 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Building2, Users, FileSearch, Activity, ShieldCheck, LogOut,
+  Bot, Cpu, Flag, Settings, BarChart3,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/auth.store";
 import { cn } from "@/lib/utils/cn";
 
 const navItems = [
   { href: "/admin",                       label: "Overview",       icon: Activity },
+  { href: "/admin/analytics",            label: "Analytics",      icon: BarChart3 },
   { href: "/admin/organization-requests", label: "Access Requests", icon: FileSearch },
   { href: "/admin/organizations",         label: "Organizations",  icon: Building2 },
   { href: "/admin/users",                 label: "Users",          icon: Users },
-  { href: "/admin/audit",                 label: "Audit Log",      icon: ShieldCheck },
+  { href: "/admin/agents",               label: "Agent Monitor",  icon: Bot },
+  { href: "/admin/system",               label: "System Health",  icon: Cpu },
+  { href: "/admin/flags",                label: "Feature Flags",  icon: Flag },
+  { href: "/admin/audit",                label: "Audit Log",      icon: ShieldCheck },
+  { href: "/admin/settings",             label: "Settings",       icon: Settings },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

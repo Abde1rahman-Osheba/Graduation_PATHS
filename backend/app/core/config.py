@@ -257,6 +257,29 @@ class Settings(BaseSettings):
     candidate_sourcing_reasoning_max_tokens: int = 600
     candidate_sourcing_reasoning_temperature: float = 0.2
 
+    # ── Stripe Billing ─────────────────────────────────────────────────
+    stripe_secret_key: str = ""          # sk_test_... / sk_live_...
+    stripe_webhook_secret: str = ""      # whsec_...
+    stripe_publishable_key: str = ""     # pk_test_... / pk_live_...
+    # Frontend base URL used to build success/cancel redirect URLs
+    app_frontend_url: str = "http://localhost:3000"
+
+    # ── Email (password reset + notifications) ─────────────────────────
+    # Already covered by smtp_* above — reuse those settings.
+
+    # ── Observability (PATHS-177 / PATHS-178) ──────────────────────────────
+    # Prometheus metrics endpoint (always on; set to false to disable)
+    prometheus_enabled: bool = True
+    # Sentry — leave dsn empty to disable
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.1
+    # Populated by CI from `git rev-parse --short HEAD`
+    sentry_release: str = ""
+    # OpenTelemetry — leave otel_endpoint empty to disable
+    otel_enabled: bool = False
+    otel_endpoint: str = ""   # e.g. http://localhost:4317 (gRPC)
+    otel_service_name: str = "paths-backend"
+
     # Optional aliases (no schema impact) — LINKEDIN_* / ENABLE_SCHEDULER
     linkedin_scraper_enabled: bool | None = None
     linkedin_jobs_per_hour: int | None = None

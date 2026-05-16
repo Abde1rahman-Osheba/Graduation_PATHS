@@ -23,6 +23,9 @@ tenacity
 PyJWT
 passlib==1.7.4
 bcrypt==3.2.2
+argon2-cffi
+stripe
+bleach
 pytest
 pytest-asyncio
 requests
@@ -30,6 +33,14 @@ beautifulsoup4
 
 # ── Hourly job scraper integration ─────────────────────────
 apscheduler
+
+# ── Observability (PATHS-177 / PATHS-178) ──────────────────
+prometheus-fastapi-instrumentator
+sentry-sdk[fastapi]
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-sqlalchemy
+opentelemetry-exporter-otlp-proto-grpc
 
 # Optional — only required when JOB_SCRAPER_ENABLED=true and
 # JOB_SCRAPER_STUB=false. They power the external Job_Scraper-main

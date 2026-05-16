@@ -3,6 +3,7 @@ PATHS Backend — FastAPI application entry point.
 """
 # reload-trigger: 2026-04-27
 
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -11,7 +12,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
-from app.core.logging import setup_logging
+from app.core.logging import setup_logging, set_correlation_id
 
 settings = get_settings()
 
@@ -23,6 +24,27 @@ async def lifespan(app: FastAPI):
     from app.core.logging import get_logger
     logger = get_logger(__name__)
     logger.info("Starting %s (%s)", settings.app_name, settings.app_env)
+
+    # ── Sentry (PATHS-178) — init early so startup errors are captured ──
+    if settings.sentry_dsn:
+        try:
+            import sentry_sdk
+            sentry_sdk.init(
+                dsn=settings.sentry_dsn,
+                traces_sample_rate=settings.sentry_traces_sample_rate,
+                release=settings.sentry_release or None,
+                environment=settings.app_env,
+                send_default_pii=False,
+            )
+            logger.info("Sentry initialised (env=%s)", settings.app_env)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to initialise Sentry")
+    else:
+        logger.debug("Sentry DSN not configured — error monitoring disabled")
+
+    # ── Prometheus + OpenTelemetry (PATHS-177) ──────────────────────────
+    from app.core.telemetry import configure_telemetry
+    configure_telemetry(app, settings)
 
     # Log startup warnings for non-production-safe config
     if settings.debug:
@@ -91,7 +113,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Security headers ─────────────────────────────────────────────────────
+# ── Security headers (PATHS-173) ─────────────────────────────────────────
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -99,10 +121,51 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    if settings.app_env != "development":
+
+    # CSP — strict in production; relaxed in dev for hot-reload
+    if settings.app_env == "development":
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-eval' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self' ws: wss: http://localhost:*; "
+            "font-src 'self' data:;"
+        )
+    else:
+        # Production strict CSP — no inline scripts; nonce-based would be ideal
+        # but this baseline blocks the most common XSS vectors.
+        frontend_origin = settings.app_frontend_url if hasattr(settings, "app_frontend_url") else ""
+        csp = (
+            "default-src 'self'; "
+            f"script-src 'self' {frontend_origin}; "
+            f"style-src 'self' {frontend_origin} 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            f"connect-src 'self' {frontend_origin}; "
+            "font-src 'self' data:; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self';"
+        )
         response.headers["Strict-Transport-Security"] = \
-            "max-age=31536000; includeSubDomains"
+            "max-age=15552000; includeSubDomains"  # 6 months
+
+    response.headers["Content-Security-Policy"] = csp
     return response
+
+
+# ── Correlation-ID middleware (PATHS-177) ────────────────────────────────
+# Reads the X-Correlation-ID request header (set by a gateway / client) or
+# generates a fresh UUID.  The ID is stored in a ContextVar so every log
+# record emitted during the request automatically carries it.
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    cid = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+    set_correlation_id(cid)
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = cid
+    return response
+
 
 # ── Import routers ─────────────────────────────────────────────────────
 from app.api.v1.health import router as health_router  # noqa: E402
@@ -148,6 +211,12 @@ from app.api.v1.idss import (  # noqa: E402
 )
 from app.api.v1.job_detail import router as job_detail_router  # noqa: E402
 from app.api.v1.candidate_applications import router as candidate_applications_router  # noqa: E402
+from app.api.v1.analytics import router as analytics_router  # noqa: E402
+from app.api.v1.agent_runs import router as agent_runs_router  # noqa: E402
+from app.api.v1.sourcing_agent import router as sourcing_agent_router  # noqa: E402
+from app.api.v1.billing import router as billing_router  # noqa: E402
+from app.api.v1.public import router as public_router  # noqa: E402
+from app.api.v1.owner import router as owner_router  # noqa: E402
 
 # ── Register routers ───────────────────────────────────────────────────
 app.include_router(auth_router, prefix="/api/v1")
@@ -189,6 +258,14 @@ app.include_router(candidate_plans_router, prefix="/api/v1")
 # per-service paths used by integration tests.
 app.include_router(job_detail_router, prefix="/api/v1")
 app.include_router(candidate_applications_router, prefix="/api/v1")
+app.include_router(analytics_router, prefix="/api/v1")
+app.include_router(agent_runs_router, prefix="/api/v1")
+app.include_router(sourcing_agent_router, prefix="/api/v1")
+# Phase 6 — Billing + Public endpoints
+app.include_router(billing_router, prefix="/api/v1")
+app.include_router(public_router, prefix="/api/v1")
+# Phase 7 — Owner portal
+app.include_router(owner_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
 
 

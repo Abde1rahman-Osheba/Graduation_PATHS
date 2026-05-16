@@ -16,9 +16,14 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.dependencies import OrgContext, get_current_hiring_org_context
+from app.core.dependencies import (
+    OrgContext,
+    get_current_active_user,
+    get_current_hiring_org_context,
+)
 from app.db.models.application import Application
 from app.db.models.job import Job
+from app.db.models.user import User
 from app.db.repositories import job_scraper_repo as scraper_repo
 from app.services.job_scraper.job_import_service import JobImportService
 
@@ -39,6 +44,9 @@ class JobOut(BaseModel):
     source: str | None = None
     source_type: str | None = None
     source_platform: str | None = None
+    application_mode: str = "internal_apply"
+    external_apply_url: str | None = None
+    visibility: str = "public"
     employment_type: str | None = None
     seniority_level: str | None = None
     workplace_type: str | None = None
@@ -129,6 +137,9 @@ class JobUpdateRequest(BaseModel):
     salary_max: float | None = None
     salary_currency: str | None = None
     is_active: bool | None = None
+    application_mode: str | None = None
+    visibility: str | None = None
+    external_apply_url: str | None = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -154,6 +165,9 @@ def _job_out(job: Job, applicant_count: int = 0) -> JobOut:
         source=src,
         source_type=job.source_type,
         source_platform=job.source_platform,
+        application_mode=job.application_mode if hasattr(job, "application_mode") else "internal_apply",
+        external_apply_url=job.external_apply_url if hasattr(job, "external_apply_url") else None,
+        visibility=job.visibility if hasattr(job, "visibility") else "public",
         employment_type=job.employment_type,
         seniority_level=job.seniority_level,
         workplace_type=job.workplace_type,
@@ -264,16 +278,10 @@ def list_jobs(
     ctx: OrgContext = Depends(get_current_hiring_org_context),
     db: Session = Depends(get_db),
 ):
-    """List jobs for the current organisation plus platform-wide scraped rows.
-
-    Scraped jobs are stored with ``organization_id IS NULL`` so they are
-    visible to every org without duplicating rows.
-    """
+    """List internal jobs for the current organisation only."""
     q = select(Job).where(
-        or_(
-            Job.organization_id == ctx.organization_id,
-            Job.organization_id.is_(None),
-        ),
+        Job.organization_id == ctx.organization_id,
+        Job.application_mode == "internal_apply",
     )
     if active_only:
         q = q.where(Job.is_active == True)  # noqa: E712
@@ -375,7 +383,7 @@ def get_job(
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.organization_id is not None and job.organization_id != ctx.organization_id:
+    if job.organization_id != ctx.organization_id:
         raise HTTPException(status_code=404, detail="Job not found")
     count = _count_applicants(db, job_id)
     return _job_detail_out(job, count)
@@ -385,6 +393,7 @@ def get_job(
 def create_job(
     body: JobCreateRequest,
     ctx: OrgContext = Depends(get_current_hiring_org_context),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
     """Create a manual job posting for the current organisation."""
@@ -405,7 +414,10 @@ def create_job(
         min_years_experience=body.min_years_experience,
         max_years_experience=body.max_years_experience,
         source_type="manual",
+        application_mode="internal_apply",
+        visibility="public",
         is_active=True,
+        created_by_user_id=current_user.id,
     )
     db.add(job)
     db.commit()

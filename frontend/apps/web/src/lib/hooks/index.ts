@@ -12,6 +12,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
+  billingApi,
+  publicApi,
+  authExtApi,
+  type BackendPlan,
+  type BackendSubscription,
+  type BackendInvoice,
+  type BackendUsage,
+  type BackendPublicPlan,
+  type BackendPublicJob,
+  type BackendPublicJobDetail,
+  type BackendPlatformStats,
   jobsApi,
   type JobsListFilters,
   applicationsApi,
@@ -880,6 +891,57 @@ export const useInterviewHumanDecision = () => {
   });
 };
 
+export const useInterviewList = (orgId: string) =>
+  useQuery({
+    queryKey: ["interviews", orgId],
+    queryFn: () => interviewsApi.list(orgId),
+    enabled: !!orgId,
+    staleTime: 30_000,
+  });
+
+export const useInterviewDetail = (interviewId: string | null | undefined, orgId: string) =>
+  useQuery({
+    queryKey: ["interview-session", interviewId],
+    queryFn: () => interviewRuntimeApi.getSession(interviewId as string),
+    enabled: !!interviewId,
+    staleTime: 30_000,
+  });
+
+export const useInterviewAnalysis = (interviewId: string | null | undefined, orgId: string) =>
+  useQuery({
+    queryKey: ["interview-analysis", interviewId],
+    queryFn: async () => {
+      const a = await interviewsApi.getSummary(interviewId as string, orgId);
+      return a;
+    },
+    enabled: !!interviewId && !!orgId,
+    staleTime: 30_000,
+  });
+
+export const useHumanDecision = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      interviewId,
+      orgId,
+      finalDecision,
+      hrNotes,
+    }: {
+      interviewId: string;
+      orgId: string;
+      finalDecision: string;
+      hrNotes?: string;
+    }) =>
+      interviewsApi.humanDecision(interviewId, orgId, {
+        final_decision: finalDecision,
+        hr_notes: hrNotes,
+      }),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["interview-analysis", vars.interviewId] });
+    },
+  });
+};
+
 // ── Organization Matching / Outreach hooks ────────────────────────────────
 
 export const useOrgDatabaseSearch = () => {
@@ -1481,18 +1543,15 @@ export function useCollections() {
 
 export function useSearchCollection() {
   return useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       collectionName,
       query,
+      limit,
     }: {
       collectionName: string;
       query: string;
-    }) => {
-      throw new Error(
-        "Vector search is not available via the REST API yet. " +
-          "Use the Qdrant client directly or add a search endpoint.",
-      );
-    },
+      limit?: number;
+    }) => kbApi.search(collectionName, query, limit),
   });
 }
 
@@ -1721,5 +1780,442 @@ export const useCreateJob = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
     },
+  });
+};
+
+// ── Screening (Phase 2) ────────────────────────────────────────────────────
+
+import {
+  analyticsApi,
+  screeningApi,
+  agentRunsApi,
+  sourcingAgentApi,
+  type BackendAnalyticsSummary,
+  type BackendAgentRun,
+  type BackendBiasReport,
+  type BackendBiasSummary,
+  type BackendPoolRun,
+  type BackendScreeningRun,
+} from "@/lib/api";
+
+export const useRunScreening = (jobId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { organization_id: string; top_k?: number }) =>
+      screeningApi.run(jobId, vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["screeningRuns", jobId] });
+    },
+  });
+};
+
+export const useScreeningRun = (runId: string | null | undefined) =>
+  useQuery({
+    queryKey: ["screeningRun", runId],
+    queryFn: () => screeningApi.getRun(runId as string),
+    enabled: !!runId,
+    staleTime: 10_000,
+  });
+
+export const useBiasReport = (runId: string | null | undefined) =>
+  useQuery({
+    queryKey: ["biasReport", runId],
+    queryFn: () => screeningApi.getBiasReport(runId as string),
+    enabled: !!runId,
+    staleTime: 60_000,
+  });
+
+// ── Analytics (Phase 2.5) ─────────────────────────────────────────────────
+
+export const useAnalyticsSummary = (days = 30) =>
+  useQuery({
+    queryKey: ["analyticsSummary", days],
+    queryFn: () => analyticsApi.summary(days),
+    staleTime: 60_000,
+  });
+
+export const useAnalyticsBiasSummary = (days = 30) =>
+  useQuery({
+    queryKey: ["analyticsBiasSummary", days],
+    queryFn: () => analyticsApi.biasSummary(days),
+    staleTime: 60_000,
+  });
+
+// ── Agent Runs (Phase 2/3) ─────────────────────────────────────────────────
+
+/** Poll a single agent run — 2s interval while queued/running, then stops. */
+export const useAgentRun = (runId: string | null | undefined) =>
+  useQuery({
+    queryKey: ["agentRun", runId],
+    queryFn: () => agentRunsApi.get(runId as string),
+    enabled: !!runId,
+    staleTime: 0,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 2_000 : false;
+    },
+  });
+
+/** List recent agent runs for an org — used by the global AgentRunsListener. */
+export const useOrgAgentRuns = (
+  orgId: string,
+  params?: { run_type?: string; status?: string; limit?: number },
+) =>
+  useQuery({
+    queryKey: ["agentRuns", orgId, params],
+    queryFn: () => agentRunsApi.list(orgId, params),
+    enabled: !!orgId,
+    staleTime: 5_000,
+    refetchInterval: 5_000,   // poll every 5 s to detect completions
+  });
+
+// ── Sourcing Agent hooks (Phase 3) ────────────────────────────────────────────
+
+export const useBuildCandidatePool = (jobId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      organization_id: string;
+      top_k?: number;
+      min_score?: number;
+      provider?: string;
+      location_filter?: string | null;
+      workplace_filter?: string[];
+    }) => sourcingAgentApi.buildPool(jobId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["poolRuns", jobId] });
+    },
+  });
+};
+
+export const usePoolRuns = (jobId: string | null | undefined, orgId: string) =>
+  useQuery({
+    queryKey: ["poolRuns", jobId, orgId],
+    queryFn: () => sourcingAgentApi.getPoolRuns(jobId as string, orgId),
+    enabled: !!jobId && !!orgId,
+    staleTime: 15_000,
+  });
+
+export const useRecomputeDecision = (jobId: string) =>
+  useMutation({
+    mutationFn: (body: { organization_id: string; candidate_id: string; application_id?: string }) =>
+      sourcingAgentApi.recomputeDecision(jobId, body),
+  });
+
+// ── Phase 6 — Billing hooks ──────────────────────────────────────────────────
+
+/** Fetch all public plans (for /pricing and /billing). */
+export const usePublicPlans = () =>
+  useQuery({
+    queryKey: ["publicPlans"],
+    queryFn: () => publicApi.getPublicPlans(),
+    staleTime: 5 * 60_000,
+  });
+
+/** Fetch the org's active subscription. */
+export const useOrgSubscription = (orgId: string | null | undefined) =>
+  useQuery({
+    queryKey: ["orgSubscription", orgId],
+    queryFn: () => billingApi.getSubscription(orgId as string),
+    enabled: !!orgId,
+    staleTime: 30_000,
+  });
+
+/** Fetch the org's invoice history. */
+export const useOrgInvoices = (orgId: string | null | undefined) =>
+  useQuery({
+    queryKey: ["orgInvoices", orgId],
+    queryFn: () => billingApi.getInvoices(orgId as string),
+    enabled: !!orgId,
+    staleTime: 60_000,
+  });
+
+/** Fetch the org's current-period usage counters. */
+export const useUsage = (orgId: string | null | undefined) =>
+  useQuery({
+    queryKey: ["orgUsage", orgId],
+    queryFn: () => billingApi.getUsage(orgId as string),
+    enabled: !!orgId,
+    staleTime: 30_000,
+  });
+
+/** Start a Stripe Checkout Session — redirects to Stripe. */
+export const useUpgradePlan = (orgId: string) =>
+  useMutation({
+    mutationFn: ({
+      planCode,
+      billingCycle,
+    }: {
+      planCode: string;
+      billingCycle: "monthly" | "annual";
+    }) => billingApi.createCheckoutSession(orgId, planCode, billingCycle),
+    onSuccess: (data) => {
+      if (data.checkout_url) window.location.assign(data.checkout_url);
+    },
+  });
+
+/** Open the Stripe Customer Portal — redirects to Stripe. */
+export const useCustomerPortalLink = (orgId: string) =>
+  useMutation({
+    mutationFn: () => billingApi.getCustomerPortalUrl(orgId),
+    onSuccess: (data) => {
+      if (data.portal_url) window.location.assign(data.portal_url);
+    },
+  });
+
+// ── Phase 6 — Public site hooks ─────────────────────────────────────────────
+
+export const usePlatformStats = () =>
+  useQuery({
+    queryKey: ["platformStats"],
+    queryFn: () => publicApi.getPlatformStats(),
+    staleTime: 60_000,
+  });
+
+export const usePublicJobsList = (params?: {
+  q?: string;
+  location?: string;
+  work_mode?: string;
+  page?: number;
+}) =>
+  useQuery({
+    queryKey: ["publicJobs", params],
+    queryFn: () => publicApi.getPublicJobs(params),
+    staleTime: 30_000,
+  });
+
+export const usePublicJobDetail = (slug: string | null | undefined) =>
+  useQuery({
+    queryKey: ["publicJob", slug],
+    queryFn: () => publicApi.getPublicJob(slug as string),
+    enabled: !!slug,
+    staleTime: 60_000,
+  });
+
+// ── Phase 6 — Auth (forgot/reset password) ──────────────────────────────────
+
+export const useForgotPassword = () =>
+  useMutation({
+    mutationFn: (email: string) => authExtApi.forgotPassword(email),
+  });
+
+export const useResetPassword = () =>
+  useMutation({
+    mutationFn: ({ token, newPassword }: { token: string; newPassword: string }) =>
+      authExtApi.resetPassword(token, newPassword),
+  });
+
+// ── Phase 7 — Admin hooks ────────────────────────────────────────────────────
+
+import {
+  platformAdminApi,
+  type AdminAgentRun,
+  type AdminFeatureFlag,
+  type AdminOrgDossier,
+  type AdminPlatformSettings,
+  type AdminPlatformStats,
+  type AdminSystemHealth,
+} from "@/lib/api/platform-admin.api";
+
+export const useAdminPlatformStats = () =>
+  useQuery({
+    queryKey: ["adminPlatformStats"],
+    queryFn: () => platformAdminApi.platformStats(),
+    staleTime: 30_000,
+  });
+
+export const useAdminOrgDossier = (id: string | null | undefined) =>
+  useQuery({
+    queryKey: ["adminOrgDossier", id],
+    queryFn: () => platformAdminApi.getOrgDossier(id as string),
+    enabled: !!id,
+    staleTime: 15_000,
+  });
+
+export const useImpersonateOrg = () => {
+  return useMutation({
+    mutationFn: ({ orgId, reason }: { orgId: string; reason: string }) =>
+      platformAdminApi.impersonateOrg(orgId, reason),
+  });
+};
+
+export const useImpersonateUser = () => {
+  return useMutation({
+    mutationFn: ({ userId, reason }: { userId: string; reason: string }) =>
+      platformAdminApi.impersonateUser(userId, reason),
+  });
+};
+
+export const useSuspendUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, suspended }: { userId: string; suspended: boolean }) =>
+      platformAdminApi.suspendUser(userId, suspended),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminUsers"] }),
+  });
+};
+
+export const useAdminAgentRuns = (params?: {
+  run_type?: string;
+  status?: string;
+  org_id?: string;
+  limit?: number;
+}) =>
+  useQuery({
+    queryKey: ["adminAgentRuns", params],
+    queryFn: () => platformAdminApi.listAgentRuns(params),
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+
+export const useRetryAgentRun = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => platformAdminApi.retryAgentRun(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminAgentRuns"] }),
+  });
+};
+
+export const useAdminSystemHealth = () =>
+  useQuery({
+    queryKey: ["adminSystemHealth"],
+    queryFn: () => platformAdminApi.systemHealth(),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+  });
+
+export const useAdminFeatureFlags = () =>
+  useQuery({
+    queryKey: ["adminFeatureFlags"],
+    queryFn: () => platformAdminApi.listFeatureFlags(),
+    staleTime: 30_000,
+  });
+
+export const useToggleFeatureFlag = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      platformAdminApi.updateFeatureFlag(id, { enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminFeatureFlags"] }),
+  });
+};
+
+export const useCreateFeatureFlag = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { code: string; description?: string; enabled?: boolean }) =>
+      platformAdminApi.createFeatureFlag(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminFeatureFlags"] }),
+  });
+};
+
+export const useAdminPlatformSettings = () =>
+  useQuery({
+    queryKey: ["adminPlatformSettings"],
+    queryFn: () => platformAdminApi.getPlatformSettings(),
+    staleTime: 30_000,
+  });
+
+export const useUpdatePlatformSettings = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Partial<AdminPlatformSettings>) =>
+      platformAdminApi.updatePlatformSettings(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminPlatformSettings"] }),
+  });
+};
+
+// ── Phase 7 — Owner hooks ────────────────────────────────────────────────────
+
+import {
+  ownerApi,
+  type OwnerRevenueSummary,
+  type OwnerCustomer,
+  type OwnerOrg,
+  type OwnerPlan,
+  type OwnerRevenuePoint,
+  type OwnerAnnouncement,
+} from "@/lib/api/owner.api";
+
+export const useRevenueSummary = () =>
+  useQuery({
+    queryKey: ["revenueSummary"],
+    queryFn: () => ownerApi.revenueSummary(),
+    staleTime: 30_000,
+  });
+
+export const useRevenueAnalytics = (params?: { from?: string; to?: string }) =>
+  useQuery({
+    queryKey: ["revenueAnalytics", params],
+    queryFn: () => ownerApi.revenueAnalytics(params),
+    staleTime: 60_000,
+  });
+
+export const useOwnerCustomers = (params?: { health?: string; plan?: string }) =>
+  useQuery({
+    queryKey: ["ownerCustomers", params],
+    queryFn: () => ownerApi.listCustomers(params),
+    staleTime: 30_000,
+  });
+
+export const useOwnerOrgs = (params?: { q?: string; plan?: string }) =>
+  useQuery({
+    queryKey: ["ownerOrgs", params],
+    queryFn: () => ownerApi.listOrgs(params),
+    staleTime: 30_000,
+  });
+
+export const useOwnerPlans = () =>
+  useQuery({
+    queryKey: ["ownerPlans"],
+    queryFn: () => ownerApi.listPlans(),
+    staleTime: 60_000,
+  });
+
+export const useUpsertPlan = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Omit<OwnerPlan, "id"> & { id?: string }) =>
+      data.id
+        ? ownerApi.updatePlan(data.id, data)
+        : ownerApi.createPlan(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ownerPlans"] }),
+  });
+};
+
+export const useOwnerPlatformConfig = () =>
+  useQuery({
+    queryKey: ["ownerPlatformConfig"],
+    queryFn: () => ownerApi.getPlatformConfig(),
+    staleTime: 30_000,
+  });
+
+export const useUpdateOwnerPlatformConfig = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ownerApi.updatePlatformConfig,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ownerPlatformConfig"] }),
+  });
+};
+
+export const useMarketingAnalytics = () =>
+  useQuery({
+    queryKey: ["marketingAnalytics"],
+    queryFn: () => ownerApi.marketingAnalytics(),
+    staleTime: 60_000,
+  });
+
+export const useOwnerAnnouncements = () =>
+  useQuery({
+    queryKey: ["ownerAnnouncements"],
+    queryFn: () => ownerApi.listAnnouncements(),
+    staleTime: 30_000,
+  });
+
+export const useCreateAnnouncement = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ownerApi.createAnnouncement,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ownerAnnouncements"] }),
   });
 };

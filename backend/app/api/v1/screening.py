@@ -22,7 +22,12 @@ from app.core.dependencies import (
     get_current_hiring_org_context,
     require_active_org_status,
 )
+from app.core.database import SessionLocal
+from app.db.models.bias_reports import BiasReport
+from app.db.models.screening import ScreeningRun
 from app.schemas.screening import (
+    BiasReportEntry,
+    BiasReportResponse,
     ScreeningResultDetail,
     ScreeningResultItem,
     ScreeningResultsListResponse,
@@ -251,3 +256,67 @@ def get_screening_result_detail(
     if detail is None:
         raise HTTPException(status_code=404, detail="screening_result_not_found")
     return ScreeningResultDetail(**detail)
+
+
+# -- Bias report ---------------------------------------------------------------
+
+
+@router.get(
+    "/runs/{run_id}/bias-report",
+    response_model=BiasReportResponse,
+    summary="Get the bias guardrail report for a screening run.",
+)
+def get_bias_report(
+    run_id: str,
+    ctx: OrgContext = Depends(require_active_org_status),
+):
+    """
+    Returns per-attribute, per-group disparate-impact metrics for the
+    screening run produced by the bias_guardrail_node (Phase 2.1).
+
+    ``has_flags=True`` means at least one group's selection rate fell
+    below the job's disparate-impact threshold.
+    """
+    rid = _parse_uuid(run_id, "run_id")
+
+    db = SessionLocal()
+    try:
+        run: ScreeningRun | None = db.get(ScreeningRun, rid)
+        if run is None:
+            raise HTTPException(status_code=404, detail="screening_run_not_found")
+        if str(run.organization_id) != str(ctx.organization_id):
+            raise HTTPException(status_code=404, detail="screening_run_not_found")
+
+        rows: list[BiasReport] = (
+            db.query(BiasReport)
+            .filter(BiasReport.screening_run_id == rid)
+            .order_by(BiasReport.attribute_name, BiasReport.group_label)
+            .all()
+        )
+
+        entries = [
+            BiasReportEntry(
+                attribute_name=r.attribute_name,
+                group_label=r.group_label,
+                selection_count=r.selection_count,
+                total_count=r.total_count,
+                selection_rate=r.selection_rate,
+                disparate_impact_ratio=r.disparate_impact_ratio,
+                threshold=r.threshold,
+                passed=r.passed,
+            )
+            for r in rows
+        ]
+
+        flagged = list({e.attribute_name for e in entries if not e.passed})
+
+        return BiasReportResponse(
+            screening_run_id=str(rid),
+            job_id=str(run.job_id),
+            organization_id=str(run.organization_id),
+            has_flags=bool(flagged),
+            flagged_attributes=flagged,
+            entries=entries,
+        )
+    finally:
+        db.close()

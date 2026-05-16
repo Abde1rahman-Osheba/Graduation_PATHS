@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Shell } from "@/components/layout/shell";
 import { useAuthStore } from "@/lib/stores/auth.store";
+import { AgentRunsListener } from "@/components/features/agents/AgentRunsListener";
+import { ImpersonationBanner } from "@/components/layout/ImpersonationBanner";
 
 /**
  * Dashboard route group — gating rules:
@@ -60,5 +62,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return null;
   }
 
-  return <Shell>{children}</Shell>;
+  const orgId: string =
+    typeof window !== "undefined"
+      ? JSON.parse(localStorage.getItem("paths_org") ?? "{}")?.organization_id ?? ""
+      : "";
+
+  return (
+    <Shell>
+      <ImpersonationBanner />
+      {orgId && <AgentRunsListener orgId={orgId} />}
+      {children}
+    </Shell>
+  );
 }

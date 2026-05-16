@@ -2,6 +2,11 @@
 PATHS Backend — Security utilities.
 
 Provides password hashing / verification and JWT token management.
+
+Password algorithm: argon2id (PATHS-170).
+Strategy: new passwords are hashed with argon2id. Legacy bcrypt hashes are
+transparently verified on login and rehashed to argon2id on success (progressive
+upgrade — no forced migration batch needed).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -13,19 +18,37 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# argon2id is the primary scheme; bcrypt is kept as deprecated fallback for
+# existing hashes so they can be verified and progressively rehashed.
+pwd_context = CryptContext(
+    schemes=["argon2", "bcrypt"],
+    deprecated=["bcrypt"],
+    argon2__type="ID",
+    argon2__time_cost=2,
+    argon2__memory_cost=65536,  # 64 MiB
+    argon2__parallelism=2,
+)
 
 
 # ── Password helpers ──────────────────────────────────────────────────────
 
 def hash_password(plain: str) -> str:
-    """Hash a plain-text password."""
+    """Hash a plain-text password with argon2id."""
     return pwd_context.hash(plain)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Verify a plain-text password against a hash."""
+    """Verify a plain-text password against any stored hash (argon2id or legacy bcrypt)."""
     return pwd_context.verify(plain, hashed)
+
+
+def needs_rehash(hashed: str) -> bool:
+    """Return True if the stored hash uses an algorithm weaker than the current default.
+
+    Call this after verify_password() succeeds. If True, rehash and persist the
+    updated hash so the account progressively migrates to argon2id.
+    """
+    return pwd_context.needs_update(hashed)
 
 
 # ── JWT helpers ───────────────────────────────────────────────────────────

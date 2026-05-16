@@ -38,12 +38,23 @@ const levels    = ["All", "Junior", "Mid", "Senior", "Lead"];
 
 type ApplyState = "idle" | "loading" | "success" | "already_applied" | "wrong_role" | "error";
 
-function ApplyButton({ jobId }: { jobId: string }) {
+function ApplyButton({ jobId, applicationMode, externalApplyUrl }: { jobId: string; applicationMode: string; externalApplyUrl: string | null }) {
   const router  = useRouter();
   const { isAuthenticated, _hasHydrated, user } = useAuthStore();
   const { mutateAsync: applyToJob } = useApplyToJob();
   const [applyState, setApplyState] = useState<ApplyState>("idle");
   const [errorMsg,   setErrorMsg]   = useState("");
+
+  /* ── External job — direct redirect ─── */
+  if (applicationMode === "external_redirect" && externalApplyUrl) {
+    return (
+      <Button size="sm" className="mt-3 gap-1.5" variant="outline" asChild>
+        <a href={externalApplyUrl} target="_blank" rel="noopener noreferrer">
+          Apply externally <ArrowRight className="h-3.5 w-3.5" />
+        </a>
+      </Button>
+    );
+  }
 
   /* ── Step 1: still hydrating from localStorage ─── */
   if (!_hasHydrated) {
@@ -301,6 +312,11 @@ export default function JobsPage() {
                     >
                       {job.workMode}
                     </Badge>
+                    {job.applicationMode === "external_redirect" && (
+                      <Badge variant="outline" className="text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-400">
+                        External
+                      </Badge>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-4 text-[12px] text-muted-foreground">
@@ -327,8 +343,7 @@ export default function JobsPage() {
 
                 <div className="shrink-0 text-right">
                   <p className="text-[13px] font-semibold text-foreground">{job.salary}</p>
-                  {/* ↓ THE FIX — auth-aware apply button, no longer hardcoded to /candidate-signup */}
-                  <ApplyButton jobId={job.id} />
+                  <ApplyButton jobId={job.id} applicationMode={job.applicationMode} externalApplyUrl={job.externalApplyUrl} />
                 </div>
               </div>
             </motion.div>

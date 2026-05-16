@@ -24,7 +24,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.rbac import AccountType, OrgRole
-from app.core.security import create_access_token, verify_password
+from app.core.security import create_access_token, hash_password, needs_rehash, verify_password
 from app.db.models.organization import (
     Organization,
     OrganizationAccessRequest,
@@ -329,6 +329,10 @@ def login(db: Session, data: LoginRequest) -> LoginResponse:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
         )
+
+    # Progressive rehash: upgrade bcrypt → argon2id on successful login (PATHS-170)
+    if needs_rehash(user.hashed_password):
+        user.hashed_password = hash_password(data.password)
 
     # Build JWT claims
     claims: dict = {

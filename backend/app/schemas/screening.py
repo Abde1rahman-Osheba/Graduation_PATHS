@@ -83,6 +83,34 @@ class ScreeningResultsListResponse(BaseModel):
     results: list[ScreeningResultItem] = Field(default_factory=list)
 
 
+# -- Bias Report schemas (Phase 2.1) -----------------------------------------
+
+
+class BiasReportEntry(BaseModel):
+    """Per-group disparity metric for one protected attribute."""
+
+    attribute_name: str
+    group_label: str
+    selection_count: int = 0
+    total_count: int = 0
+    selection_rate: float = 0.0
+    # NULL for the reference (highest-rate) group
+    disparate_impact_ratio: float | None = None
+    threshold: float = 0.8
+    passed: bool = True
+
+
+class BiasReportResponse(BaseModel):
+    """Bias guardrail report for one screening run."""
+
+    screening_run_id: str
+    job_id: str
+    organization_id: str
+    has_flags: bool
+    flagged_attributes: list[str] = Field(default_factory=list)
+    entries: list[BiasReportEntry] = Field(default_factory=list)
+
+
 __all__ = [
     "ScreenJobRequest",
     "ScreeningRunResponse",
@@ -90,4 +118,6 @@ __all__ = [
     "ScreeningResultDetail",
     "ScreeningRunWithResults",
     "ScreeningResultsListResponse",
+    "BiasReportEntry",
+    "BiasReportResponse",
 ]

@@ -528,6 +528,12 @@ export interface BackendDocumentChunk {
   metadata: Record<string, unknown>;
 }
 
+export interface BackendVectorSearchHit {
+  id: string;
+  score: number;
+  payload: Record<string, unknown>;
+}
+
 export const kbApi = {
   listCollections: () =>
     api.get<{ collections: string[] }>("/api/v1/system/qdrant/collections"),
@@ -539,6 +545,12 @@ export const kbApi = {
     api.post<{ status: string; collection: string; action: string }>(
       "/api/v1/system/qdrant/init-collections",
     ),
+  search: (collection: string, query: string, limit = 5) =>
+    api.post<BackendVectorSearchHit[]>("/api/v1/system/qdrant/search", {
+      collection,
+      query,
+      limit,
+    }),
 };
 
 // ── Identity Resolution ────────────────────────────────────────────────────
@@ -2015,3 +2027,309 @@ export async function getCandidateDetail(candidateId: string, jobId?: string): P
   const qs = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
   return api.get<BackendCandidateDetail>(`/api/v1/candidates/${encodeURIComponent(candidateId)}/profile${qs}`);
 }
+
+// ── Screening Agent (Phase 2) ─────────────────────────────────────────────
+
+export interface BackendScreeningResult {
+  result_id: string;
+  blind_label: string;
+  rank_position: number | null;
+  agent_score: number;
+  vector_similarity_score: number;
+  final_score: number;
+  relevance_score: number | null;
+  recommendation: string | null;
+  match_classification: string | null;
+  status: string;
+}
+
+export interface BackendScreeningRun {
+  screening_run_id: string;
+  organization_id: string;
+  job_id: string;
+  source: string;
+  top_k: number;
+  status: string;
+  total_candidates_scanned: number;
+  candidates_passed_filter: number;
+  candidates_scored: number;
+  candidates_failed: number;
+  error_message: string | null;
+  results?: BackendScreeningResult[];
+}
+
+export interface BackendBiasReportEntry {
+  attribute_name: string;
+  group_label: string;
+  selection_count: number;
+  total_count: number;
+  selection_rate: number;
+  disparate_impact_ratio: number | null;
+  threshold: number;
+  passed: boolean;
+}
+
+export interface BackendBiasReport {
+  screening_run_id: string;
+  job_id: string;
+  organization_id: string;
+  has_flags: boolean;
+  flagged_attributes: string[];
+  entries: BackendBiasReportEntry[];
+}
+
+export const screeningApi = {
+  run: (jobId: string, body: { organization_id: string; top_k?: number; force_rescore?: boolean }) =>
+    api.post<BackendScreeningRun>(`/api/v1/screening/jobs/${encodeURIComponent(jobId)}/screen`, body),
+  getRun: (runId: string) =>
+    api.get<BackendScreeningRun>(`/api/v1/screening/runs/${encodeURIComponent(runId)}`),
+  getResults: (runId: string) =>
+    api.get<{ screening_run_id: string; job_id: string; results: BackendScreeningResult[] }>(
+      `/api/v1/screening/runs/${encodeURIComponent(runId)}/results`,
+    ),
+  getBiasReport: (runId: string) =>
+    api.get<BackendBiasReport>(`/api/v1/screening/runs/${encodeURIComponent(runId)}/bias-report`),
+};
+
+// ── Analytics (Phase 2.5) ─────────────────────────────────────────────────
+
+export interface BackendAnalyticsSummary {
+  org_id: string;
+  period_days: number;
+  total_active_jobs: number;
+  total_applications: number;
+  total_screening_runs: number;
+  total_candidates_screened: number;
+  total_shortlisted: number;
+  event_counts: { event_type: string; count: number }[];
+  pipeline_funnel: { stage: string; count: number }[];
+  generated_at: string;
+}
+
+export interface BackendBiasSummary {
+  org_id: string;
+  period_days: number;
+  total_runs_checked: number;
+  runs_with_flags: number;
+  total_flags: number;
+  attributes: {
+    attribute_name: string;
+    total_groups_checked: number;
+    groups_flagged: number;
+    min_disparate_impact_ratio: number | null;
+    avg_disparate_impact_ratio: number | null;
+  }[];
+  generated_at: string;
+}
+
+export const analyticsApi = {
+  summary: (days = 30) =>
+    api.get<BackendAnalyticsSummary>(`/api/v1/analytics/summary?days=${days}`),
+  biasSummary: (days = 30) =>
+    api.get<BackendBiasSummary>(`/api/v1/analytics/bias-summary?days=${days}`),
+};
+
+// ── Agent Runs (Phase 2 completion / Phase 3) ──────────────────────────────
+
+export interface BackendAgentRun {
+  run_id: string;
+  run_type: string;
+  status: "queued" | "running" | "completed" | "failed";
+  current_node: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  result_ref: Record<string, unknown> | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export const agentRunsApi = {
+  get: (runId: string) =>
+    api.get<BackendAgentRun>(`/api/v1/agent-runs/${encodeURIComponent(runId)}`),
+  list: (orgId: string, params?: { run_type?: string; status?: string; limit?: number }) => {
+    const qs = new URLSearchParams({ org_id: orgId });
+    if (params?.run_type) qs.set("run_type", params.run_type);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    return api.get<BackendAgentRun[]>(`/api/v1/agent-runs?${qs.toString()}`);
+  },
+};
+
+// ── Sourcing Agent (Phase 3) ───────────────────────────────────────────────
+
+export interface BackendPoolRun {
+  pool_run_id: string;
+  job_id: string;
+  status: string;
+  candidates_found: number;
+  created_at: string;
+}
+
+export const sourcingAgentApi = {
+  buildPool: (
+    jobId: string,
+    body: {
+      organization_id: string;
+      top_k?: number;
+      min_score?: number;
+      provider?: string;
+      location_filter?: string | null;
+      workplace_filter?: string[];
+    },
+  ) =>
+    api.post<{ run_id: string; agent_run_id: string; message: string }>(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/candidate-pool/build`,
+      body,
+    ),
+  getPoolRuns: (jobId: string, orgId: string, limit = 10) =>
+    api.get<BackendPoolRun[]>(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/candidate-pool/runs?org_id=${orgId}&limit=${limit}`,
+    ),
+  recomputeDecision: (
+    jobId: string,
+    body: { organization_id: string; candidate_id: string; application_id?: string },
+  ) =>
+    api.post<{ agent_run_id: string; message: string }>(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/decisions/recompute`,
+      body,
+    ),
+};
+
+// ── Billing types ──────────────────────────────────────────────────────────
+
+export interface BackendPlan {
+  id: string;
+  name: string;
+  code: string;
+  price_monthly_cents: number;
+  price_annual_cents: number;
+  currency: string;
+  limits: Record<string, number>;
+  features: string[];
+  is_public: boolean;
+  stripe_price_id_monthly: string | null;
+  stripe_price_id_annual: string | null;
+}
+
+export interface BackendSubscription {
+  id: string;
+  org_id: string;
+  plan: BackendPlan | null;
+  billing_cycle: string;
+  status: string;
+  trial_ends_at: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+}
+
+export interface BackendInvoice {
+  id: string;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  pdf_url: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  paid_at: string | null;
+  stripe_invoice_id: string | null;
+}
+
+export interface BackendUsage {
+  org_id: string;
+  period_start: string | null;
+  period_end: string | null;
+  cvs_processed: number;
+  jobs_active: number;
+  agent_runs: number;
+  seats_used: number;
+}
+
+export const billingApi = {
+  getPlans: () => api.get<BackendPlan[]>("/api/v1/billing/plans"),
+  getSubscription: (orgId: string) =>
+    api.get<BackendSubscription | null>(`/api/v1/billing/subscription?org_id=${orgId}`),
+  getInvoices: (orgId: string) =>
+    api.get<BackendInvoice[]>(`/api/v1/billing/invoices?org_id=${orgId}`),
+  getUsage: (orgId: string) =>
+    api.get<BackendUsage>(`/api/v1/billing/usage?org_id=${orgId}`),
+  createCheckoutSession: (orgId: string, planCode: string, billingCycle: "monthly" | "annual") =>
+    api.post<{ checkout_url: string }>(
+      `/api/v1/billing/checkout-session?org_id=${orgId}`,
+      { plan_code: planCode, billing_cycle: billingCycle },
+    ),
+  getCustomerPortalUrl: (orgId: string) =>
+    api.post<{ portal_url: string }>(`/api/v1/billing/customer-portal?org_id=${orgId}`, {}),
+};
+
+// ── Public API types ────────────────────────────────────────────────────────
+
+export interface BackendPublicPlan {
+  id: string;
+  name: string;
+  code: string;
+  price_monthly_cents: number;
+  price_annual_cents: number;
+  currency: string;
+  limits: Record<string, number>;
+  features: string[];
+}
+
+export interface BackendPlatformStats {
+  orgs_count: number;
+  cvs_processed: number;
+  active_jobs: number;
+  placements: number;
+}
+
+export interface BackendPublicJob {
+  id: string;
+  slug: string;
+  title: string;
+  company: string;
+  location: string;
+  work_mode: string | null;
+  employment_type: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  currency: string | null;
+  level: string | null;
+  description_preview: string | null;
+  date_posted: string | null;
+  valid_through: string | null;
+}
+
+export interface BackendPublicJobDetail extends BackendPublicJob {
+  description_full: string | null;
+  required_skills: string[];
+  preferred_skills: string[];
+}
+
+export const publicApi = {
+  getPlatformStats: () => api.get<BackendPlatformStats>("/api/v1/public/platform-stats"),
+  getPublicPlans: () => api.get<BackendPublicPlan[]>("/api/v1/public/plans"),
+  getPublicJobs: (params?: { q?: string; location?: string; work_mode?: string; page?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.q) qs.set("q", params.q);
+    if (params?.location) qs.set("location", params.location);
+    if (params?.work_mode) qs.set("work_mode", params.work_mode);
+    if (params?.page) qs.set("page", String(params.page));
+    return api.get<BackendPublicJob[]>(`/api/v1/public/jobs?${qs}`);
+  },
+  getPublicJob: (slug: string) =>
+    api.get<BackendPublicJobDetail>(`/api/v1/public/jobs/${encodeURIComponent(slug)}`),
+};
+
+// ── Auth (forgot/reset password) ────────────────────────────────────────────
+
+export const authExtApi = {
+  forgotPassword: (email: string) =>
+    api.post<{ detail: string }>("/api/v1/auth/forgot-password", { email }),
+  resetPassword: (token: string, newPassword: string) =>
+    api.post<{ detail: string }>("/api/v1/auth/reset-password", {
+      token,
+      new_password: newPassword,
+    }),
+};

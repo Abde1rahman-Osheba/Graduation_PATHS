@@ -84,6 +84,25 @@ from app.db.models.candidate_sourcing import (
     CandidatePoolRun,
     CandidatePoolMember,
 )
+from app.db.models.bias_reports import BiasReport
+from app.db.models.analytics_events import AnalyticsEvent
+from app.db.models.agent_runs import AgentRun
+from app.db.models.growth_plans import GrowthPlan
+from app.db.models.billing import (
+    Plan,
+    Subscription,
+    Invoice,
+    UsageCounter,
+    StripeProcessedEvent,
+    PasswordResetToken,
+)
+from app.db.models.admin_platform import (
+    FeatureFlag,
+    FeatureFlagOverride,
+    PlatformSettings,
+    Announcement,
+    ImpersonationSession,
+)
 
 __all__ = [
     "Base",
@@ -181,4 +200,23 @@ __all__ = [
     "JobCandidatePoolConfig",
     "CandidatePoolRun",
     "CandidatePoolMember",
+    # Phase 2 — Bias Reports & Analytics
+    "BiasReport",
+    "AnalyticsEvent",
+    # Phase 2/3 — Agent Runs & Growth Plans
+    "AgentRun",
+    "GrowthPlan",
+    # Phase 6 — Billing & Commercial Launch
+    "Plan",
+    "Subscription",
+    "Invoice",
+    "UsageCounter",
+    "StripeProcessedEvent",
+    "PasswordResetToken",
+    # Phase 7 — Admin & Owner Portals
+    "FeatureFlag",
+    "FeatureFlagOverride",
+    "PlatformSettings",
+    "Announcement",
+    "ImpersonationSession",
 ]

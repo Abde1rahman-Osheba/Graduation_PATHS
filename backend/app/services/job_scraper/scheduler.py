@@ -87,6 +87,18 @@ class JobScraperScheduler:
             max_instances=1,
             coalesce=True,
         )
+
+        # GDPR hard-delete cron — runs once per day (PATHS-175)
+        from apscheduler.triggers.cron import CronTrigger
+        self._scheduler.add_job(
+            self._gdpr_hard_delete,
+            trigger=CronTrigger(hour=2, minute=0),  # 02:00 UTC daily
+            id="paths_gdpr_hard_delete",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         self._scheduler.start()
         self._started = True
         logger.info(
@@ -126,6 +138,24 @@ class JobScraperScheduler:
                 "[JobScraperScheduler] %srun crashed (will retry next interval)",
                 "initial " if initial else "",
             )
+
+    async def _gdpr_hard_delete(self) -> None:
+        """Daily cron: hard-delete candidates past the 30-day soft-delete window."""
+        try:
+            from app.core.database import get_db
+            from app.services.gdpr_service import hard_delete_candidates_past_window
+            db_gen = get_db()
+            db = next(db_gen)
+            try:
+                count = hard_delete_candidates_past_window(db)
+                logger.info("[GDPRCron] Hard-deleted %d candidates", count)
+            finally:
+                try:
+                    next(db_gen)
+                except StopIteration:
+                    pass
+        except Exception:  # noqa: BLE001
+            logger.exception("[GDPRCron] Hard-delete cron crashed")
 
 
 # Module-level singleton

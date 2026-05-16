@@ -25,6 +25,10 @@ from sqlalchemy.orm import Session
 from app.agents.screening.state import ScreeningState
 from app.core.config import get_settings
 from app.core.database import SessionLocal
+from app.db.models.bias_fairness import BiasAuditLog, BiasFlag
+from app.db.models.bias_reports import BiasReport
+from app.db.models.candidate import Candidate
+from app.db.models.fairness_rubric import FairnessRubric
 from app.db.models.screening import ScreeningResult, ScreeningRun
 from app.services.scoring.llama_scoring_agent import (
     AgentScoreError,
@@ -327,4 +331,256 @@ def rank_and_persist(state: ScreeningState) -> dict[str, Any]:
         "ranked_results": ranked_results,
         "status": "completed",
         "error": None,
+    }
+
+
+# -- Node 4: Bias Guardrail (Phase 2.1) -------------------------------------
+
+
+def _years_exp_bucket(years: int | None) -> str:
+    """Map years_experience to an age-proxy bucket label."""
+    if years is None:
+        return "unknown"
+    if years <= 2:
+        return "0-2 yrs"
+    if years <= 5:
+        return "3-5 yrs"
+    if years <= 10:
+        return "6-10 yrs"
+    return "10+ yrs"
+
+
+# Maps rubric attribute names to a callable (Candidate -> group_label string).
+# Attributes with no stored demographic data map to None -- those will be
+# recorded as "no_data" entries in the bias_reports table so there is an
+# audit trail showing the check was attempted.
+_ATTR_GETTERS: dict[str, Any] = {
+    "gender":          None,   # not stored (privacy-preserving design)
+    "race_ethnicity":  None,   # not stored
+    "age":             lambda c: _years_exp_bucket(c.years_experience),  # proxy
+    "disability":      None,   # not stored
+    "veteran_status":  None,   # not stored
+}
+
+
+def bias_guardrail_node(state: ScreeningState) -> dict[str, Any]:
+    """Phase 2.1 -- Bias Guardrail.
+
+    After rank_and_persist, loads the job's FairnessRubric and checks each
+    enabled protected attribute:
+
+    * If a candidate field exists as a proxy  -> compute selection rates per
+      group and the disparate-impact ratio against the highest-rate group.
+    * If no candidate field maps to the attribute -> write a ``__no_data__``
+      BiasReport entry so the audit trail shows the check was attempted.
+
+    Persists rows to ``bias_reports``, raises ``BiasFlag`` entries for groups
+    below threshold, and appends to ``bias_audit_log``.
+
+    Returns ``bias_report`` (list of metric dicts) and ``bias_flags_raised``
+    (list of "attr:group" strings) into the pipeline state.
+
+    This node is a no-op when no enabled rubric exists for the job.
+    """
+    job_id_str = state["job_id"]
+    org_id_str = state["organization_id"]
+    run_id_str = state.get("screening_run_id")
+
+    db: Session = SessionLocal()
+    try:
+        # ------------------------------------------------------------------ #
+        # 1. Load the fairness rubric
+        # ------------------------------------------------------------------ #
+        rubric: FairnessRubric | None = (
+            db.query(FairnessRubric)
+            .filter(FairnessRubric.job_id == UUID(job_id_str))
+            .first()
+        )
+
+        if rubric is None or not rubric.enabled:
+            logger.info(
+                "[BiasGuardrail] No active rubric for job %s -- skipping", job_id_str,
+            )
+            return {"bias_report": [], "bias_flags_raised": []}
+
+        threshold: float = rubric.disparate_impact_threshold
+        enabled_attrs: dict[str, bool] = rubric.protected_attrs or {}
+
+        # ------------------------------------------------------------------ #
+        # 2. Load all ScreeningResults for this run
+        # ------------------------------------------------------------------ #
+        if not run_id_str:
+            logger.warning("[BiasGuardrail] No screening_run_id in state -- skipping")
+            return {"bias_report": [], "bias_flags_raised": []}
+
+        results: list[ScreeningResult] = (
+            db.query(ScreeningResult)
+            .filter(ScreeningResult.screening_run_id == UUID(run_id_str))
+            .all()
+        )
+
+        if not results:
+            return {"bias_report": [], "bias_flags_raised": []}
+
+        # ------------------------------------------------------------------ #
+        # 3. Build candidate map
+        # ------------------------------------------------------------------ #
+        candidate_ids = [r.candidate_id for r in results]
+        candidates_map: dict[UUID, Candidate] = {
+            c.id: c
+            for c in db.query(Candidate)
+            .filter(Candidate.id.in_(candidate_ids))
+            .all()
+        }
+
+        # ------------------------------------------------------------------ #
+        # 4. Per-attribute disparity computation
+        # ------------------------------------------------------------------ #
+        bias_report_entries: list[dict[str, Any]] = []
+        flags_raised: list[str] = []
+
+        for attr_name, is_enabled in enabled_attrs.items():
+            if not is_enabled:
+                continue
+
+            getter = _ATTR_GETTERS.get(attr_name)
+
+            if getter is None:
+                # Attribute has no stored demographic data -- write audit entry
+                logger.info(
+                    "[BiasGuardrail] attr=%s has no candidate field; "
+                    "writing no-data entry", attr_name,
+                )
+                db.add(BiasReport(
+                    screening_run_id=UUID(run_id_str),
+                    organization_id=UUID(org_id_str),
+                    job_id=UUID(job_id_str),
+                    attribute_name=attr_name,
+                    group_label="__no_data__",
+                    selection_count=0,
+                    total_count=0,
+                    selection_rate=0.0,
+                    disparate_impact_ratio=None,
+                    threshold=threshold,
+                    passed=True,
+                ))
+                continue
+
+            # Group results by attribute value --------------------------------
+            groups: dict[str, dict[str, int]] = {}
+            for result in results:
+                cand = candidates_map.get(result.candidate_id)
+                if cand is None:
+                    continue
+                label = getter(cand)
+                if label not in groups:
+                    groups[label] = {"total": 0, "selected": 0}
+                groups[label]["total"] += 1
+                if result.status == "shortlisted":
+                    groups[label]["selected"] += 1
+
+            if not groups:
+                continue
+
+            # Compute per-group selection rates
+            rates: dict[str, float] = {
+                lbl: (g["selected"] / g["total"]) if g["total"] > 0 else 0.0
+                for lbl, g in groups.items()
+            }
+            reference_rate = max(rates.values(), default=0.0)
+            reference_label = max(rates, key=lambda k: rates[k]) if rates else None
+
+            # Persist BiasReport rows + raise flags ---------------------------
+            for label, g in groups.items():
+                rate = rates[label]
+                is_reference = (label == reference_label)
+                dir_ratio: float | None = (
+                    None
+                    if is_reference or reference_rate == 0
+                    else rate / reference_rate
+                )
+                passed = is_reference or (dir_ratio is None) or (dir_ratio >= threshold)
+
+                db.add(BiasReport(
+                    screening_run_id=UUID(run_id_str),
+                    organization_id=UUID(org_id_str),
+                    job_id=UUID(job_id_str),
+                    attribute_name=attr_name,
+                    group_label=label,
+                    selection_count=g["selected"],
+                    total_count=g["total"],
+                    selection_rate=rate,
+                    disparate_impact_ratio=dir_ratio,
+                    threshold=threshold,
+                    passed=passed,
+                ))
+
+                bias_report_entries.append({
+                    "attribute_name": attr_name,
+                    "group_label": label,
+                    "selection_count": g["selected"],
+                    "total_count": g["total"],
+                    "selection_rate": rate,
+                    "disparate_impact_ratio": dir_ratio,
+                    "threshold": threshold,
+                    "passed": passed,
+                })
+
+                if not passed:
+                    flag_key = f"{attr_name}:{label}"
+                    flags_raised.append(flag_key)
+                    db.add(BiasFlag(
+                        org_id=UUID(org_id_str),
+                        scope="screening_run",
+                        scope_id=run_id_str,
+                        rule="disparate_impact",
+                        severity="high",
+                        status="open",
+                        detail={
+                            "attribute": attr_name,
+                            "group": label,
+                            "selection_rate": rate,
+                            "reference_group": reference_label,
+                            "reference_rate": reference_rate,
+                            "disparate_impact_ratio": dir_ratio,
+                            "threshold": threshold,
+                        },
+                    ))
+                    logger.warning(
+                        "[BiasGuardrail] FLAG: attr=%s group=%s DIR=%.3f < threshold=%.2f",
+                        attr_name, label, dir_ratio, threshold,
+                    )
+
+        # ------------------------------------------------------------------ #
+        # 5. Write to BiasAuditLog
+        # ------------------------------------------------------------------ #
+        db.add(BiasAuditLog(
+            org_id=org_id_str,
+            event_type="bias_flag_raised" if flags_raised else "screening_bias_check_passed",
+            job_id=job_id_str,
+            detail_json={
+                "screening_run_id": run_id_str,
+                "flags_raised": flags_raised,
+                "attributes_checked": [a for a, v in enabled_attrs.items() if v],
+                "total_results": len(results),
+            },
+        ))
+
+        db.commit()
+        logger.info(
+            "[BiasGuardrail] job=%s run=%s: %d groups checked, %d flags raised",
+            job_id_str, run_id_str, len(bias_report_entries), len(flags_raised),
+        )
+
+    except Exception:
+        db.rollback()
+        logger.exception("[BiasGuardrail] failed for job %s", job_id_str)
+        # Non-fatal: return empty report rather than failing the whole pipeline
+        return {"bias_report": [], "bias_flags_raised": []}
+    finally:
+        db.close()
+
+    return {
+        "bias_report": bias_report_entries,
+        "bias_flags_raised": flags_raised,
     }

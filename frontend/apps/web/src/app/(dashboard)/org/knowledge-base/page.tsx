@@ -1,13 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Database, Loader2, AlertCircle, CheckCircle2, Circle,
-  Layers, BarChart3, Search, BookOpen,
+  Layers, BarChart3, Search, BookOpen, FileText, Hash,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -17,7 +19,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils/cn";
 import { useCollections, useSearchCollection } from "@/lib/hooks";
-import type { BackendQdrantCollection } from "@/lib/api";
+import type { BackendQdrantCollection, BackendVectorSearchHit } from "@/lib/api";
 
 function formatNumber(n: number | null | undefined): string {
   if (n == null) return "—";
@@ -114,6 +116,11 @@ export default function KnowledgeBasePage() {
   const { data: collections = [], isLoading, isError } = useCollections();
   const searchMutation = useSearchCollection();
 
+  // RAG test panel state
+  const [searchCollection, setSearchCollection] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<BackendVectorSearchHit[]>([]);
+
   const totalVectors = collections.reduce(
     (sum: number, c: BackendQdrantCollection) => sum + (c.vectors_count ?? 0),
     0,
@@ -123,6 +130,16 @@ export default function KnowledgeBasePage() {
       getStatusConfig(c.status).label === "Active",
   ).length;
   const isConnected = collections.length === 0 || connectedCount > 0;
+
+  async function handleSearch() {
+    if (!searchCollection || !searchQuery.trim()) return;
+    const results = await searchMutation.mutateAsync({
+      collectionName: searchCollection,
+      query: searchQuery.trim(),
+      limit: 5,
+    });
+    setSearchResults(results);
+  }
 
   return (
     <div className="h-full overflow-y-auto p-6 space-y-8 max-w-5xl">
@@ -264,30 +281,41 @@ export default function KnowledgeBasePage() {
         </div>
       )}
 
-      {/* ── Search / Retrieval test box ──────────────────────────────── */}
+      {/* ── RAG / Semantic search test panel ─────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
-        className="glass gradient-border rounded-2xl p-6 space-y-4"
+        className="glass gradient-border rounded-2xl p-6 space-y-5"
       >
+        {/* Panel header */}
         <div className="flex items-center gap-2">
           <Search className="h-4 w-4 text-primary" />
           <h2 className="text-sm font-semibold tracking-wider text-foreground">
-            Search / Retrieval
+            Semantic Search &amp; RAG Test
           </h2>
-          <Badge variant="outline" className="text-[10px]">
-            Coming Soon
+          <Badge variant="outline" className="text-[10px] ml-auto">
+            Live
           </Badge>
         </div>
         <p className="text-xs text-muted-foreground">
-          Semantic search across vector collections. Connect via the Qdrant REST
-          API or gRPC interface for programmatic access.
+          Enter a natural-language query. The backend embeds it with{" "}
+          <code className="font-mono text-[10px] bg-muted/40 px-1 rounded">
+            nomic-embed-text
+          </code>{" "}
+          and runs a cosine-similarity search against the selected Qdrant
+          collection. Results include the score and stored payload.
         </p>
+
+        {/* Controls */}
         <div className="flex flex-col gap-3 sm:flex-row">
-          <Select disabled>
-            <SelectTrigger className="w-full sm:w-48" size="sm">
-              <SelectValue placeholder="Select collection" />
+          <Select
+            value={searchCollection}
+            onValueChange={setSearchCollection}
+            disabled={collections.length === 0}
+          >
+            <SelectTrigger className="w-full sm:w-52" size="sm">
+              <SelectValue placeholder="Select collection…" />
             </SelectTrigger>
             <SelectContent>
               {collections.map((c) => (
@@ -298,21 +326,129 @@ export default function KnowledgeBasePage() {
             </SelectContent>
           </Select>
           <Input
-            placeholder="Enter search query…"
-            className="flex-1"
-            disabled
+            placeholder="e.g. Python machine learning engineer with NLP experience"
+            className="flex-1 text-xs"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            disabled={searchMutation.isPending}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSearch();
+            }}
           />
-          <Button size="sm" disabled>
-            <Search className="h-3.5 w-3.5 mr-1" />
-            Search
+          <Button
+            size="sm"
+            onClick={handleSearch}
+            disabled={
+              !searchCollection ||
+              !searchQuery.trim() ||
+              searchMutation.isPending
+            }
+            className="gap-1.5"
+          >
+            {searchMutation.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Search className="h-3.5 w-3.5" />
+            )}
+            {searchMutation.isPending ? "Searching…" : "Search"}
           </Button>
         </div>
+
+        {/* Error */}
         {searchMutation.isError && (
-          <div className="flex items-center gap-2 text-xs text-amber-400">
-            <AlertCircle className="h-3 w-3" />
-            {searchMutation.error?.message ?? "Search unavailable"}
+          <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-400">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span>
+              {(searchMutation.error as Error)?.message ?? "Search failed"}
+            </span>
           </div>
         )}
+
+        {/* Results */}
+        {searchResults.length > 0 && (
+          <div className="space-y-3">
+            <Separator />
+            <p className="text-xs text-muted-foreground">
+              {searchResults.length} result{searchResults.length !== 1 ? "s" : ""}{" "}
+              for &ldquo;{searchQuery}&rdquo;
+            </p>
+            <div className="space-y-2">
+              {searchResults.map((hit, i) => {
+                const text =
+                  (hit.payload?.text as string) ||
+                  (hit.payload?.content as string) ||
+                  (hit.payload?.chunk_text as string) ||
+                  null;
+                const source =
+                  (hit.payload?.source as string) ||
+                  (hit.payload?.filename as string) ||
+                  null;
+
+                return (
+                  <motion.div
+                    key={hit.id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.04 * i }}
+                    className="rounded-lg border border-border/60 bg-muted/10 p-3 space-y-2"
+                  >
+                    {/* Score + id row */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Hash className="h-3 w-3 text-muted-foreground" />
+                        <span className="font-mono text-[10px] text-muted-foreground truncate max-w-[160px]">
+                          {hit.id}
+                        </span>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[10px] shrink-0",
+                          hit.score >= 0.8
+                            ? "text-emerald-400 border-emerald-500/30"
+                            : hit.score >= 0.5
+                            ? "text-amber-400 border-amber-500/30"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        score {hit.score.toFixed(4)}
+                      </Badge>
+                    </div>
+
+                    {/* Source */}
+                    {source && (
+                      <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                        <FileText className="h-3 w-3" />
+                        {source}
+                      </p>
+                    )}
+
+                    {/* Text snippet */}
+                    {text ? (
+                      <p className="text-xs leading-relaxed line-clamp-4">
+                        {text}
+                      </p>
+                    ) : (
+                      <pre className="text-[10px] text-muted-foreground overflow-x-auto whitespace-pre-wrap break-words">
+                        {JSON.stringify(hit.payload, null, 2)}
+                      </pre>
+                    )}
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Empty state after a successful search */}
+        {!searchMutation.isPending &&
+          searchMutation.isSuccess &&
+          searchResults.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-4">
+              No results found. Try a different query or check that the
+              collection has ingested documents.
+            </p>
+          )}
       </motion.div>
     </div>
   );

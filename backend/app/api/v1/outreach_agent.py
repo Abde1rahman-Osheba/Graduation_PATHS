@@ -24,7 +24,8 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -219,6 +220,75 @@ def send_atomic(
         status=session.status,
         error=result.get("error"),
         gmail_message_id=result.get("gmail_message_id"),
+    )
+
+
+# -- Batch outreach run (Phase 2.3 LangGraph agent) ---------------------------
+
+
+class OutreachRunRequest(BaseModel):
+    """Body for POST /jobs/{job_id}/outreach/run"""
+
+    candidate_ids: list[UUID] = Field(
+        ..., min_length=1, max_length=50,
+        description="Shortlisted candidate IDs to outreach in one batch.",
+    )
+
+
+class OutreachRunResponse(BaseModel):
+    status: str
+    sent_count: int = 0
+    failed_count: int = 0
+    compose_errors: list[str] = []
+    session_results: list[dict] = []
+    analytics_event_id: str | None = None
+    error: str | None = None
+
+
+@router.post(
+    "/jobs/{job_id}/run",
+    response_model=OutreachRunResponse,
+    summary="Batch outreach — compose + send + track for a list of candidates.",
+    tags=["Outreach Agent"],
+)
+async def run_outreach_batch(
+    job_id: UUID,
+    body: OutreachRunRequest,
+    ctx: OrgContext = Depends(get_current_hiring_org_context),
+):
+    """
+    Run the full Outreach Agent pipeline (compose → send → track) for a
+    list of shortlisted candidates in one call.
+
+    Requires a connected Google integration for the calling HR user.
+    """
+    from app.agents.outreach.graph import build_outreach_graph
+
+    graph = build_outreach_graph()
+    state_in = {
+        "job_id": str(job_id),
+        "organization_id": str(ctx.organization_id),
+        "hr_user_id": str(ctx.user.id),
+        "candidate_ids": [str(c) for c in body.candidate_ids],
+    }
+
+    try:
+        result = await graph.ainvoke(state_in)
+    except Exception as exc:
+        logger.exception("Outreach batch failed for job %s", job_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"outreach_failed: {exc}",
+        ) from exc
+
+    return OutreachRunResponse(
+        status=result.get("status", "unknown"),
+        sent_count=result.get("sent_count", 0),
+        failed_count=result.get("failed_count", 0),
+        compose_errors=result.get("compose_errors") or [],
+        session_results=result.get("session_results") or [],
+        analytics_event_id=result.get("analytics_event_id"),
+        error=result.get("error"),
     )
 
 

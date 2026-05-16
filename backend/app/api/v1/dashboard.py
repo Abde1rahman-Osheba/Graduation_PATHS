@@ -35,12 +35,13 @@ def get_dashboard_stats(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_ago = now - timedelta(days=30)
 
-    # Active jobs: org-owned postings plus platform-wide imported rows (same visibility as GET /jobs)
+    # Active jobs: only internal org-owned jobs (exclude external scraped)
     active_jobs = db.execute(
         select(func.count())
         .select_from(Job)
         .where(
-            or_(Job.organization_id == org_id, Job.organization_id.is_(None)),
+            Job.organization_id == org_id,
+            Job.application_mode == "internal_apply",
             Job.is_active == True,  # noqa: E712
         )
     ).scalar_one()

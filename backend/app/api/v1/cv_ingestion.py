@@ -13,6 +13,23 @@ from app.core.config import get_settings
 router = APIRouter(prefix="/cv-ingestion", tags=["CV Ingestion"])
 settings = get_settings()
 
+# Allowed MIME signatures (magic bytes) — PATHS-172
+_ALLOWED_MIMES = {
+    b"%PDF": "application/pdf",
+    b"PK\x03\x04": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+    b"\xd0\xcf\x11\xe0": "application/msword",  # legacy .doc
+}
+_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _sniff_mime(header: bytes) -> str | None:
+    """Return MIME type if the magic bytes match an allowed type, else None."""
+    for magic, mime in _ALLOWED_MIMES.items():
+        if header.startswith(magic):
+            return mime
+    return None
+
+
 @router.post("/upload")
 async def upload_cv(
     background_tasks: BackgroundTasks,
@@ -20,12 +37,30 @@ async def upload_cv(
     candidate_id: str | None = None,
     db: Session = Depends(get_db)
 ):
+    # Read first 8 bytes for MIME sniffing — PATHS-172
+    header = await file.read(8)
+    mime = _sniff_mime(header)
+    if mime is None:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported file type. Only PDF and Word documents are accepted.",
+        )
+
+    # Read remainder and enforce size limit
+    rest = await file.read()
+    total_size = len(header) + len(rest)
+    if total_size > _MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum allowed size is {_MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB.",
+        )
+
     upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
     os.makedirs(upload_dir, exist_ok=True)
-    
+
     file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{file.filename}")
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(header + rest)
         
     cand_uuid = uuid.UUID(candidate_id) if candidate_id else None
     

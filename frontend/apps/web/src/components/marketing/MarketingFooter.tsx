@@ -1,6 +1,23 @@
+"use client";
+
 import Link from "next/link";
 import { Shield, Globe, FileText } from "lucide-react";
 import { PathsWordmark } from "@/components/ui/PathsWordmark";
+
+/** Clears stored consent so the banner re-appears on next page load. */
+function CookieSettingsButton() {
+  return (
+    <button
+      onClick={() => {
+        localStorage.removeItem("paths-cookie-consent");
+        window.location.reload();
+      }}
+      className="text-[12px] text-slate-400 hover:text-slate-600 underline underline-offset-2 transition-colors"
+    >
+      Cookie settings
+    </button>
+  );
+}
 
 const cols = [
   {
@@ -15,10 +32,11 @@ const cols = [
   {
     heading: "Company",
     links: [
-      { label: "About PATHS",    href: "#" },
-      { label: "Privacy Policy", href: "#" },
-      { label: "Terms of Service",href: "#" },
-      { label: "Contact",         href: "#" },
+      { label: "About PATHS",     href: "#"                },
+      { label: "Privacy Policy",  href: "/legal/privacy"   },
+      { label: "Terms of Service",href: "/legal/terms"     },
+      { label: "Platform Status", href: "/status"          },
+      { label: "Contact",         href: "#"                },
     ],
   },
   {
@@ -96,9 +114,12 @@ export default function MarketingFooter() {
           <p className="text-[12px] text-slate-400">
             © 2026 PATHS AI. All rights reserved.
           </p>
-          <p className="text-[12px] text-slate-300">
-            Built to reduce bias. Designed for transparency.
-          </p>
+          <div className="flex items-center gap-4">
+            <CookieSettingsButton />
+            <p className="text-[12px] text-slate-300">
+              Built to reduce bias. Designed for transparency.
+            </p>
+          </div>
         </div>
       </div>
     </footer>

@@ -53,6 +53,7 @@ function pathNeedsRealJwt(path: string): boolean {
   }
   if (path.startsWith("/api/v1/jobs/public")) return false;
   if (path.startsWith("/api/v1/schedule/")) return false;
+  if (path === "/api/v1/health" || path.startsWith("/api/v1/health/")) return false;
   return true;
 }
 
