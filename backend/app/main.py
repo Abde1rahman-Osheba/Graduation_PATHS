@@ -71,6 +71,28 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("Failed to start hourly job-scraper scheduler")
 
+    # ── One-time data-fix: 'recruiter' is not a valid AccountType ────────
+    # Seed scripts written before the enum was finalized used "recruiter".
+    # Patch any such rows to "organization_member" so auth works correctly.
+    try:
+        from sqlalchemy import text
+        from app.core.database import SessionLocal
+        with SessionLocal() as _db:
+            result = _db.execute(
+                text(
+                    "UPDATE users SET account_type = 'organization_member' "
+                    "WHERE account_type = 'recruiter'"
+                )
+            )
+            if result.rowcount:
+                _db.commit()
+                logger.info(
+                    "Startup fix: patched %d user(s) account_type recruiter→organization_member",
+                    result.rowcount,
+                )
+    except Exception:  # noqa: BLE001
+        logger.exception("Startup fix: failed to patch recruiter account_type rows")
+
     try:
         yield
     finally:

@@ -45,6 +45,7 @@ import type {
   OrgSourceSettingsUpdate,
   SourceTypeKey,
 } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/utils/cn";
 
 // Maps each toggleable source to (a) the settings flag column name, (b) an
@@ -170,6 +171,8 @@ export default function CandidateSourcesPage() {
   const loading =
     catalog.isLoading || settings.isLoading || counts.isLoading || form === null;
   const fatal = settings.isError;
+  const fatalStatus =
+    settings.error instanceof ApiError ? settings.error.status : null;
 
   // Build per-source-card view model
   const cards = useMemo(() => {
@@ -246,16 +249,28 @@ export default function CandidateSourcesPage() {
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-amber-400" />
             <h2 className="text-base font-semibold text-foreground">
-              Source settings backend not reachable
+              {fatalStatus === 403
+                ? "Organization access required"
+                : fatalStatus === 401
+                  ? "Session expired"
+                  : "Source settings unavailable"}
             </h2>
           </div>
           <p className="text-sm text-muted-foreground">
-            The endpoint{" "}
-            <code className="font-mono text-xs bg-muted/50 px-1 rounded">
-              /api/v1/organization/candidate-source-settings
-            </code>{" "}
-            did not respond. Toggles are disabled until the backend is
-            available.
+            {fatalStatus === 403 ? (
+              "Your account does not have organization access. Make sure you are logged in as an organization member."
+            ) : fatalStatus === 401 ? (
+              "Your session has expired. Please sign in again."
+            ) : (
+              <>
+                The endpoint{" "}
+                <code className="font-mono text-xs bg-muted/50 px-1 rounded">
+                  /api/v1/organization/candidate-source-settings
+                </code>{" "}
+                did not respond. Toggles are disabled until the backend is
+                available.
+              </>
+            )}
           </p>
         </div>
       )}

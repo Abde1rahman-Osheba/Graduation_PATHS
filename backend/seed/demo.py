@@ -262,7 +262,7 @@ def seed_organizations(
                 email=recruiter_email,
                 full_name=f"{f} {l}",
                 hashed_password=hash_password("Recruiter@123!"),
-                account_type="recruiter",
+                account_type="organization_member",
                 is_active=True,
             )
             db.add(recruiter)
@@ -679,15 +679,15 @@ def seed_interview_and_decision(
         ))
         db.flush()
 
-    # Growth plan
+    # Growth plan (GrowthPlan stores IDs as VARCHAR, cast to str)
     growth = db.query(GrowthPlan).filter_by(
-        candidate_id=candidate.id, job_id=job.id
+        candidate_id=str(candidate.id), job_id=str(job.id)
     ).first()
     if not growth:
         db.add(GrowthPlan(
-            candidate_id=candidate.id,
-            job_id=job.id,
-            organization_id=job.organization_id,
+            candidate_id=str(candidate.id),
+            job_id=str(job.id),
+            organization_id=str(job.organization_id),
             status="active",
             candidate_facing_message=(
                 "Strong technical foundation. Focus first 30 days on domain knowledge "
@@ -713,7 +713,7 @@ def seed_agent_runs(db: Session, org_id: uuid.UUID) -> None:
     run_types = ["cv_ingestion", "scoring", "sourcing", "decision_support"]
     for rtype in run_types:
         run = AgentRun(
-            organization_id=org_id,
+            organization_id=str(org_id),
             run_type=rtype,
             status="completed",
             triggered_by="demo_seed",
