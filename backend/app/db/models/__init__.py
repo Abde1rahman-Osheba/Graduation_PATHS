@@ -10,7 +10,8 @@ from app.db.models.organization import (
 from app.db.models.user import User
 from app.db.models.candidate import Candidate
 from app.db.models.job import Job
-from app.db.models.application import Application
+from app.db.models.application import Application, OrganizationMember
+from app.db.models.fairness_rubric import FairnessRubric
 from app.db.models.ingestion import IngestionJob, OutboxEvent
 from app.db.models.cv_entities import CandidateDocument, Skill, CandidateSkill, CandidateExperience, CandidateEducation, CandidateCertification
 from app.db.models.job_ingestion import JobSourceRun, JobRawItem, JobSkillRequirement, IngestionError, JobVectorProjectionStatus
@@ -114,6 +115,8 @@ __all__ = [
     "Candidate",
     "Job",
     "Application",
+    "OrganizationMember",
+    "FairnessRubric",
     "IngestionJob",
     "OutboxEvent",
     "CandidateDocument",

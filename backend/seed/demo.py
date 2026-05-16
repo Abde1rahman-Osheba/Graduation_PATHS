@@ -276,16 +276,16 @@ def seed_organizations(
             db.add(OrganizationMember(
                 user_id=recruiter.id,
                 organization_id=org.id,
-                role="admin",
+                role_code="admin",
             ))
             db.flush()
 
         # Subscription
-        sub = db.query(Subscription).filter_by(organization_id=org.id).first()
+        sub = db.query(Subscription).filter_by(org_id=org.id).first()
         if not sub:
             plan = plans[spec["plan_code"]]
             sub = Subscription(
-                organization_id=org.id,
+                org_id=org.id,
                 plan_id=plan.id,
                 status="active" if spec["is_active"] else "pending",
                 current_period_start=_ago(days=15),
@@ -297,12 +297,13 @@ def seed_organizations(
             # One invoice
             if spec["is_active"] and plan.price_monthly_cents > 0:
                 db.add(Invoice(
-                    organization_id=org.id,
+                    org_id=org.id,
                     subscription_id=sub.id,
                     amount_cents=plan.price_monthly_cents,
                     currency="USD",
                     status="paid",
-                    invoice_date=_ago(days=15),
+                    period_start=_ago(days=45),
+                    period_end=_ago(days=15),
                     paid_at=_ago(days=15),
                 ))
                 db.flush()
@@ -416,9 +417,9 @@ def seed_candidates(db: Session, count: int = 50) -> list[Candidate]:
     # Ensure Skill rows exist
     skill_map: dict[str, Skill] = {}
     for skill_name in TECH_SKILLS:
-        s = db.query(Skill).filter_by(name=skill_name).first()
+        s = db.query(Skill).filter_by(normalized_name=skill_name).first()
         if not s:
-            s = Skill(name=skill_name, category="technical")
+            s = Skill(normalized_name=skill_name, category="technical")
             db.add(s)
             db.flush()
         skill_map[skill_name] = s
@@ -461,13 +462,14 @@ def seed_candidates(db: Session, count: int = 50) -> list[Candidate]:
         db.flush()
 
         # Candidate skills
+        prof_scores = {"beginner": 0.25, "intermediate": 0.5, "advanced": 0.75, "expert": 1.0}
         for skill_name in skills_sample:
+            lvl = RNG.choice(["beginner", "intermediate", "advanced", "expert"])
             db.add(CandidateSkill(
                 candidate_id=cand.id,
                 skill_id=skill_map[skill_name].id,
-                proficiency_level=RNG.choice(["beginner", "intermediate", "advanced", "expert"]),
-                years_experience=min(yoe, RNG.randint(1, yoe)),
-                is_primary=skill_name == skills_sample[0],
+                proficiency_score=prof_scores[lvl],
+                years_used=min(yoe, RNG.randint(1, yoe)),
             ))
 
         # Work experience
@@ -479,9 +481,7 @@ def seed_candidates(db: Session, count: int = 50) -> list[Candidate]:
             title=RNG.choice(JOB_TITLES),
             start_date=start_date.date(),
             end_date=None,
-            is_current=True,
             description=f"Building scalable systems using {', '.join(skills_sample[:3])}.",
-            location=RNG.choice(LOCATIONS),
         ))
         db.flush()
         candidates.append(cand)
@@ -541,10 +541,11 @@ def seed_screening_and_bias(
         job_id=job.id,
         organization_id=job.organization_id,
         status="completed",
-        total_candidates=len(applications),
-        processed_candidates=len(applications),
+        source="demo_seed",
+        total_candidates_scanned=len(applications),
+        candidates_scored=len(applications),
         started_at=_ago(days=5, hours=2),
-        completed_at=_ago(days=5),
+        finished_at=_ago(days=5),
     )
     db.add(run)
     db.flush()
@@ -555,33 +556,41 @@ def seed_screening_and_bias(
         db.add(ScreeningResult(
             screening_run_id=run.id,
             candidate_id=app.candidate_id,
-            application_id=app.id,
-            score=score,
+            job_id=app.job_id,
+            final_score=score,
             recommendation="shortlist" if score >= 0.7 else "review",
-            reasoning=f"Candidate demonstrates strong skills in {RNG.choice(TECH_SKILLS)}.",
-            rank=i + 1,
+            explanation=f"Candidate demonstrates strong skills in {RNG.choice(TECH_SKILLS)}.",
+            rank_position=i + 1,
         ))
     db.flush()
 
-    # Bias report
-    report = db.query(BiasReport).filter_by(screening_run_id=run.id).first()
-    if not report:
-        db.add(BiasReport(
-            screening_run_id=run.id,
-            job_id=job.id,
-            organization_id=job.organization_id,
-            status="completed",
-            overall_bias_score=round(RNG.uniform(0.05, 0.15), 4),
-            gender_bias_score=round(RNG.uniform(0.02, 0.1), 4),
-            ethnicity_bias_score=round(RNG.uniform(0.02, 0.1), 4),
-            age_bias_score=round(RNG.uniform(0.01, 0.08), 4),
-            flagged_criteria=[],
-            summary=(
-                "Low overall bias detected. Gender parity is within acceptable range. "
-                "Recommend reviewing criteria weighting for years-of-experience scoring."
-            ),
-            generated_at=_ago(days=4),
-        ))
+    # Bias report — one row per protected attribute (schema is per-attribute)
+    existing_reports = db.query(BiasReport).filter_by(
+        screening_run_id=run.id
+    ).count()
+    if not existing_reports:
+        for attr_name, group_a, group_b in [
+            ("gender",    "male",   "female"),
+            ("ethnicity", "group_a", "group_b"),
+            ("age_band",  "25-34",  "45-54"),
+        ]:
+            sel_rate_a = round(RNG.uniform(0.55, 0.75), 3)
+            sel_rate_b = round(RNG.uniform(0.40, 0.60), 3)
+            di = round(sel_rate_b / sel_rate_a, 3) if sel_rate_a > 0 else 1.0
+            for label, rate in [(group_a, sel_rate_a), (group_b, sel_rate_b)]:
+                db.add(BiasReport(
+                    screening_run_id=run.id,
+                    job_id=job.id,
+                    organization_id=job.organization_id,
+                    attribute_name=attr_name,
+                    group_label=label,
+                    selection_count=int(rate * 10),
+                    total_count=10,
+                    selection_rate=rate,
+                    disparate_impact_ratio=di,
+                    threshold=0.8,
+                    passed=di >= 0.8,
+                ))
         db.flush()
 
     print(f"  ✓ Screening run + bias report for: {job.title}")
@@ -592,21 +601,37 @@ def seed_interview_and_decision(
     db: Session, job: Job, candidate: Candidate, recruiter: User
 ) -> None:
     """Create interview → transcript → evaluation → hire decision → growth plan."""
-    # Interview
+    # Interview — requires an application_id (NOT NULL)
+    app_row = db.query(Application).filter_by(
+        candidate_id=candidate.id, job_id=job.id
+    ).first()
+    if not app_row:
+        app_row = Application(
+            candidate_id=candidate.id,
+            job_id=job.id,
+            application_type="standard",
+            source_channel="demo_seed",
+            current_stage_code="interview",
+            pipeline_stage="interview",
+            overall_status="active",
+        )
+        db.add(app_row)
+        db.flush()
+
     interview = db.query(Interview).filter_by(
         job_id=job.id, candidate_id=candidate.id
     ).first()
     if not interview:
         interview = Interview(
+            application_id=app_row.id,
             job_id=job.id,
             candidate_id=candidate.id,
             organization_id=job.organization_id,
-            interviewer_id=recruiter.id,
-            scheduled_at=_ago(days=3),
-            duration_minutes=45,
+            created_by_user_id=recruiter.id,
+            scheduled_start_time=_ago(days=3),
             interview_type="technical",
             status="completed",
-            meeting_link="https://meet.example.com/paths-demo",
+            meeting_url="https://meet.example.com/paths-demo",
         )
         db.add(interview)
         db.flush()
@@ -627,9 +652,8 @@ def seed_interview_and_decision(
         ]
         db.add(InterviewTranscript(
             interview_id=interview.id,
-            raw_transcript=json.dumps(turns),
-            turn_count=len(turns),
-            duration_seconds=2700,
+            transcript_text=json.dumps(turns),
+            transcript_source="demo_seed",
             language="en",
         ))
         db.flush()
@@ -641,16 +665,17 @@ def seed_interview_and_decision(
     if not evaluation:
         db.add(InterviewEvaluation(
             interview_id=interview.id,
-            overall_score=0.87,
-            technical_score=0.9,
-            communication_score=0.85,
-            cultural_fit_score=0.86,
+            evaluation_type="ai",
+            score_json={
+                "overall": 0.87,
+                "technical": 0.9,
+                "communication": 0.85,
+                "cultural_fit": 0.86,
+            },
             recommendation="strong_hire",
-            strengths=["Deep async Python expertise", "LangGraph experience", "Fairness-aware ML mindset"],
-            concerns=["Less experience with Kubernetes"],
-            notes="Exceptional candidate. Move to offer stage immediately.",
-            evaluated_by="ai",
-            evaluated_at=_ago(days=2),
+            confidence=0.92,
+            strengths_json=["Deep async Python expertise", "LangGraph experience", "Fairness-aware ML mindset"],
+            weaknesses_json=["Less experience with Kubernetes"],
         ))
         db.flush()
 
@@ -664,8 +689,7 @@ def seed_interview_and_decision(
             job_id=job.id,
             organization_id=job.organization_id,
             status="active",
-            title=f"90-Day Onboarding Plan — {job.title}",
-            summary=(
+            candidate_facing_message=(
                 "Strong technical foundation. Focus first 30 days on domain knowledge "
                 "(hiring processes, GDPR), then 30 days on Kubernetes proficiency, "
                 "then 30 days leading a feature end-to-end."
@@ -679,7 +703,6 @@ def seed_interview_and_decision(
                 {"title": "FastAPI Advanced Tutorial", "url": "https://fastapi.tiangolo.com/advanced/"},
                 {"title": "LangGraph Docs",            "url": "https://langchain-ai.github.io/langgraph/"},
             ],
-            created_by_agent=True,
         ))
         db.flush()
         print(f"  ✓ Growth plan created for: {candidate.full_name}")
@@ -691,12 +714,11 @@ def seed_agent_runs(db: Session, org_id: uuid.UUID) -> None:
     for rtype in run_types:
         run = AgentRun(
             organization_id=org_id,
-            agent_type=rtype,
+            run_type=rtype,
             status="completed",
+            triggered_by="demo_seed",
             started_at=_ago(days=RNG.randint(1, 10)),
-            completed_at=_ago(days=RNG.randint(0, 1)),
-            node_count=RNG.randint(3, 8),
-            metadata_json={"demo": True},
+            finished_at=_ago(days=RNG.randint(0, 1)),
         )
         db.add(run)
     db.flush()
