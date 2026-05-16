@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -15,7 +15,7 @@ interface Props {
 
 export function JobTabBar({ jobId }: Props) {
   const pathname = usePathname();
-  const base = `/jobs/${jobId}`;
+  const base = `/dashboard/jobs/${jobId}`;
 
   const tabs: Tab[] = [
     { label: "Overview", href: base },

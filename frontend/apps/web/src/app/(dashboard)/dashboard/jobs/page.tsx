@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
@@ -113,7 +113,7 @@ export default function JobsPage() {
             )}
             Run import
           </Button>
-          <Link href="/jobs/new">
+          <Link href="/dashboard/jobs/new">
             <Button size="sm" className="gap-1.5 h-9">
               <Plus className="h-3.5 w-3.5" /> New Job
             </Button>
@@ -305,12 +305,12 @@ export default function JobsPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Link href={`/jobs/${job.id}/screening`}>
+                    <Link href={`/dashboard/jobs/${job.id}/screening`}>
                       <Button variant="outline" size="sm" className="h-7 gap-1 text-[11px]">
                         <Zap className="h-3 w-3" /> Screening
                       </Button>
                     </Link>
-                    <Link href={`/jobs/${job.id}`}>
+                    <Link href={`/dashboard/jobs/${job.id}`}>
                       <Button variant="ghost" size="icon" className="h-7 w-7">
                         <ChevronRight className="h-3.5 w-3.5" />
                       </Button>

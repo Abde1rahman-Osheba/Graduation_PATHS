@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -420,7 +420,7 @@ export default function NewJobPage() {
       }
 
       toast.success("Job created successfully!");
-      router.push(`/jobs/${job.id}`);
+      router.push(`/dashboard/jobs/${job.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create job.");
       setIsSubmitting(false);

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { use } from "react";
 import {
@@ -193,7 +193,7 @@ export default function InterviewsPage({ params }: Props) {
                           Join
                         </a>
                       )}
-                      <Link href={`/jobs/${id}/interviews/${interview.interview_id}`}>
+                      <Link href={`/dashboard/jobs/${id}/interviews/${interview.interview_id}`}>
                         <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs">
                           <ExternalLink className="h-3 w-3" />
                           {interview.status === "completed" ? "Analysis" : "View"}

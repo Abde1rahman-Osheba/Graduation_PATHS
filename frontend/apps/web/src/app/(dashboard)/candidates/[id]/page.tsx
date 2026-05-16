@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { use, useState } from "react";
 import { motion } from "framer-motion";
@@ -464,7 +464,7 @@ export default function CandidateProfilePage({ params }: { params: Promise<{ id:
                             <p className="text-[10px] text-muted-foreground">match score</p>
                           </div>
                         )}
-                        <Link href={`/jobs/${app.jobId}/screening`}>
+                        <Link href={`/dashboard/jobs/${app.jobId}/screening`}>
                           <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs">
                             View in Job <ChevronRight className="h-3 w-3" />
                           </Button>

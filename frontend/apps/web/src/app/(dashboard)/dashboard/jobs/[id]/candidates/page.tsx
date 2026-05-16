@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { use, useState } from "react";
 import { AlertCircle, RefreshCw, Users, Search } from "lucide-react";
@@ -177,7 +177,7 @@ export default function CandidatesListPage({ params }: Props) {
                 >
                   <td className="px-4 py-3">
                     <Link
-                      href={`/jobs/${id}/candidates/${c.id}`}
+                      href={`/dashboard/jobs/${id}/candidates/${c.id}`}
                       className="hover:underline font-medium truncate block max-w-[220px]"
                     >
                       {c.name}

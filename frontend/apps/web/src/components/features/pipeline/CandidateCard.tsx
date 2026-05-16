@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -52,7 +52,7 @@ export function CandidateCard({ candidate, jobId }: Props) {
       </button>
 
       <Link
-        href={`/jobs/${jobId}/candidates/${candidate.id}`}
+        href={`/dashboard/jobs/${jobId}/candidates/${candidate.id}`}
         className="flex-1 min-w-0 hover:underline"
       >
         <p className="truncate text-sm font-medium">{candidate.name}</p>

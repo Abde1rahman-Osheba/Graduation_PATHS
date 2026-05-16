@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -39,7 +39,7 @@ const navItems = [
     group: "Workspace",
     items: [
       { label: "Dashboard",         href: "/dashboard",         icon: LayoutDashboard },
-      { label: "Jobs",              href: "/jobs",              icon: Briefcase },
+      { label: "Jobs",              href: "/dashboard/jobs",              icon: Briefcase },
       { label: "Candidates",        href: "/candidates",        icon: Users },
       { label: "Candidate Sources", href: "/candidate-sources", icon: Globe2 },
     ],

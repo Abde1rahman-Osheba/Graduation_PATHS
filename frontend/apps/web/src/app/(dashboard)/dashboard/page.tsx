@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -388,7 +388,7 @@ export default function DashboardPage() {
       key: "first-job",
       label: "Create your first job",
       hint: "Open a role to start screening candidates.",
-      href: "/jobs",
+      href: "/dashboard/jobs",
       done: jobs.length > 0,
     },
     {
@@ -428,7 +428,7 @@ export default function DashboardPage() {
       key: "no-jobs",
       label: "No jobs created yet",
       detail: "Create your first job to start the hiring pipeline.",
-      href: "/jobs",
+      href: "/dashboard/jobs",
       count: 0,
       severity: "info",
       icon: Briefcase,

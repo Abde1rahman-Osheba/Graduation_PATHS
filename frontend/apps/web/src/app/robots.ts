@@ -1,4 +1,4 @@
-import type { MetadataRoute } from "next";
+﻿import type { MetadataRoute } from "next";
 
 const BASE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://paths.app";
 
@@ -19,7 +19,7 @@ export default function robots(): MetadataRoute.Robots {
         allow: [
           "/",
           "/pricing",
-          "/jobs",
+          "/dashboard/jobs",
           "/jobs/",
           "/for-companies",
           "/for-candidates",
@@ -38,7 +38,7 @@ export default function robots(): MetadataRoute.Robots {
           "/rejected",
           // Internal app routes
           "/dashboard",
-          "/jobs/new",
+          "/dashboard/jobs/new",
           "/billing",
           "/settings",
           "/approvals",
